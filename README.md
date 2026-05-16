@@ -1,16 +1,39 @@
-# bongisamine
+# Bongisamine
 
-A new Flutter project.
+Application Flutter de gestion de présence et d’activités (migration depuis Expo/React Native).
 
-## Getting Started
+**Dépôt GitHub :** [Pincha005-tech/bongisamine](https://github.com/Pincha005-tech/bongisamine)
 
-This project is a starting point for a Flutter application.
+## Démarrage rapide
 
-A few resources to get you started if this is your first Flutter project:
+```powershell
+cd bongisamine
+flutter pub get
+flutter run
+```
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## Contribution et merge
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Le flux Git (branche `update`, pull request vers `main`, procédure pour le reviewer) est documenté dans **[MERGE_GUIDE.md](./MERGE_GUIDE.md)**.
+
+En bref pour pousser votre travail :
+
+1. `git checkout -b update` (ou `git checkout update`)
+2. `git add .` puis `git commit -m "..."`
+3. `git push -u origin update`
+4. Ouvrir une PR **update → main** sur GitHub
+
+## Structure utile
+
+| Dossier / fichier | Rôle |
+|-------------------|------|
+| `lib/Screens/` | Écrans auth, accueil, navigation |
+| `lib/pages/` | Pages métier (dashboard, workers, scan, paramètres) |
+| `lib/coree/auth/` | Session utilisateur locale |
+| `lib/coree/theme/` | Thème clair / sombre |
+| `MERGE_GUIDE.md` | Guide détaillé push, PR et merge |
+
+## Documentation Flutter
+
+- [Documentation Flutter](https://docs.flutter.dev/)
+- [Cookbook](https://docs.flutter.dev/cookbook)

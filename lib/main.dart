@@ -1,16 +1,57 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 
-import 'screens/start_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'coree/auth/auth_controller.dart';
+import 'coree/routing/native_intent_redirect.dart';
+import 'coree/routes/app_routes.dart';
 import 'coree/theme/app_themes.dart';
 import 'coree/theme/theme_notifier.dart';
-import 'coree/routes/app_routes.dart';
 
-void main() {
-  runApp(const BongisaMineApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppThemeController.initialize();
+
+  /// Équivalent `SplashScreen.preventAutoHideAsync` : le splash natif
+  /// (`flutter_native_splash`) reste jusqu’au premier frame ; il disparaît
+  /// ensuite automatiquement. Pour un `remove()` explicite, ajoutez
+  /// `flutter_native_splash` en dépendance runtime et appelez-le ici.
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (_) => AuthController(),
+        ),
+        Provider<AppQueryClient>(create: (_) => const AppQueryClient()),
+      ],
+      child: const BongisaMineApp(),
+    ),
+  );
 }
 
-class BongisaMineApp extends StatelessWidget {
+class BongisaMineApp extends StatefulWidget {
   const BongisaMineApp({super.key});
+
+  @override
+  State<BongisaMineApp> createState() => _BongisaMineAppState();
+}
+
+class _BongisaMineAppState extends State<BongisaMineApp> {
+  @override
+  void initState() {
+    super.initState();
+    /// Équivalent `useEffect(() => { SplashScreen.hideAsync(); }, [])`
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_hideSplashIfNeeded());
+    });
+  }
+
+  Future<void> _hideSplashIfNeeded() async {
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    // Ici: FlutterNativeSplash.remove() si le package est en dependency.
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,11 +60,14 @@ class BongisaMineApp extends StatelessWidget {
       builder: (_, themeMode, __) {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
-
+          initialRoute: '/',
+          onGenerateInitialRoutes: (String initialRouteName) {
+            return NativeIntentRedirect.redirectSystemPath(
+              path: initialRouteName,
+              initial: true,
+            );
+          },
           onGenerateRoute: AppRoutes.generateRoute,
-
-          home: const StartScreen(),
-
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: themeMode,

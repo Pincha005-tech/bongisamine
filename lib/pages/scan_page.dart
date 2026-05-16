@@ -1,30 +1,44 @@
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 
-import 'package:flutter/material.dart';
-import '../coree/theme/theme_notifier.dart';
+import '../coree/colors/app_colors.dart';
+import '../coree/theme/app_page_style.dart';
+import 'scan/face_scan_screen.dart';
+import 'scan/live_qr_scan_screen.dart';
 
-class ThemeToggleButton extends StatelessWidget {
-  const ThemeToggleButton({super.key});
+/// Aligné sur `expo/app/(tabs)/scan.tsx`
+enum ScanRecordType { qr, face }
 
-  @override
-  Widget build(BuildContext context) {
-    return ElevatedButton.icon(
-      icon: const Icon(Icons.brightness_6),
-      label: const Text("Changer thème"),
-      onPressed: () {
-        AppThemeController.toggleTheme();
-      },
-    );
-  }
+class ScanRecord {
+  const ScanRecord({
+    required this.id,
+    required this.type,
+    required this.value,
+    required this.time,
+  });
+
+  final String id;
+  final ScanRecordType type;
+  final String value;
+  final String time;
 }
 
-class AppColors {
-  static const skyBlue = Color(0xFF4DA6FF);
-  static const bg = Colors.white;
-}
+const List<ScanRecord> _recentScans = [
+  ScanRecord(id: '1', type: ScanRecordType.qr, value: 'EMP-4821', time: '08:14'),
+  ScanRecord(
+    id: '2',
+    type: ScanRecordType.face,
+    value: 'Jean Mukendi',
+    time: '08:12',
+  ),
+  ScanRecord(id: '3', type: ScanRecordType.qr, value: 'EMP-2954', time: '08:09'),
+  ScanRecord(id: '4', type: ScanRecordType.qr, value: 'EMP-7712', time: '07:58'),
+  ScanRecord(
+    id: '5',
+    type: ScanRecordType.face,
+    value: 'Marie Kabila',
+    time: '07:55',
+  ),
+];
 
 class ScanPage extends StatefulWidget {
   const ScanPage({super.key});
@@ -34,146 +48,416 @@ class ScanPage extends StatefulWidget {
 }
 
 class _ScanPageState extends State<ScanPage> {
-  bool isQRMode = true;
+  ScanRecordType _mode = ScanRecordType.qr;
+  bool _openingCamera = false;
+  String? _lastResult;
 
-  String result = "";
-  bool showResult = false;
-  bool isProcessing = false;
-
-  void _setResult(String value) {
-    setState(() {
-      result = value;
-      showResult = true;
-    });
-
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          showResult = false;
-        });
-      }
-    });
-  }
-
-  /// 🔥 API CALL
-  Future<void> sendToBackend(String mineralId) async {
-    final url = Uri.parse(
-        "http://192.168.X.X:8000/transactions/scan/$mineralId");
-
+  Future<void> _openCameraScan() async {
+    if (_openingCamera) return;
+    setState(() => _openingCamera = true);
     try {
-      final response = await http.get(url);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-
-        _setResult(
-            "💎 ${data['mineral']}\n✔ Transaction ID: ${data['transaction_id']}");
+      if (_mode == ScanRecordType.qr) {
+        final raw = await Navigator.push<String>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const LiveQrScanScreen(),
+            fullscreenDialog: true,
+          ),
+        );
+        if (raw != null && mounted) {
+          setState(() => _lastResult = raw);
+        }
       } else {
-        _setResult("❌ Mineral invalide");
+        final name = await Navigator.push<String>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const FaceScanScreen(),
+            fullscreenDialog: true,
+          ),
+        );
+        if (name != null && mounted) {
+          setState(() => _lastResult = name);
+        }
       }
-    } catch (e) {
-      _setResult("❌ Erreur connexion");
     } finally {
-      isProcessing = false;
+      if (mounted) setState(() => _openingCamera = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        backgroundColor: Colors.lightBlue,
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text(
-          "Scan Sécurité",
-          style: TextStyle(color: Colors.white),
-        ),
-      ),
-      body: Column(
-        children: [
-          /// MODE SWITCH
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _modeButton("QR Code", isQRMode, () {
-                  setState(() => isQRMode = true);
-                }),
-                const SizedBox(width: 10),
-                _modeButton("Visage", !isQRMode, () {
-                  setState(() => isQRMode = false);
-                }),
-              ],
-            ),
-          ),
+    final topPad = MediaQuery.paddingOf(context).top;
 
-          /// SCANNER
-          Expanded(
-            child: Container(
-              margin: const EdgeInsets.all(12),
-              child: isQRMode ? _qrScanner() : _faceScanner(),
-            ),
-          ),
-
-          /// RESULT
-          if (showResult)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.all(12),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.skyBlue.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                result,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+    return DecoratedBox(
+      decoration: context.appPageDecoration,
+      child: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(20, topPad + 24, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Scanner',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: context.appTitleAccent,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Enregistrez une présence',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: context.appOnSurfaceMuted,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
+          ),
+          SliverToBoxAdapter(child: _buildModeToggle()),
+          SliverToBoxAdapter(child: _buildScanArea()),
+          SliverToBoxAdapter(child: _buildHistorySection()),
+          const SliverToBoxAdapter(child: SizedBox(height: 32)),
         ],
       ),
     );
   }
 
-  Widget _modeButton(String text, bool active, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        decoration: BoxDecoration(
-          color: active ? AppColors.skyBlue : Colors.grey.shade200,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          text,
-          style: TextStyle(
-            color: active ? Colors.white : Colors.black,
-            fontWeight: FontWeight.bold,
+  Widget _buildModeToggle() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Material(
+        color: context.appCardColor,
+        elevation: 2,
+        shadowColor: AppColors.black.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Row(
+            children: [
+              Expanded(
+                child: _ModeSegment(
+                  active: _mode == ScanRecordType.qr,
+                  icon: Icons.qr_code_2_rounded,
+                  label: 'QR Code',
+                  onTap: () => setState(() => _mode = ScanRecordType.qr),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: _ModeSegment(
+                  active: _mode == ScanRecordType.face,
+                  icon: Icons.account_circle_outlined,
+                  label: 'Visage',
+                  onTap: () => setState(() => _mode = ScanRecordType.face),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  /// 🔥 QR SCANNER CONNECTÉ
-  Widget _qrScanner() {
-    return MobileScanner(
-      onDetect: (capture) {
-        final barcode = capture.barcodes.first.rawValue;
-
-        if (barcode != null && !isProcessing) {
-          isProcessing = true;
-          sendToBackend(barcode);
-        }
-      },
+  Widget _buildScanArea() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [AppColors.primary, AppColors.primaryDark],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Column(
+              children: [
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _openingCamera ? null : _openCameraScan,
+                    customBorder: const CircleBorder(),
+                    child: _scanCircle(
+                      fill: AppColors.cream.withValues(
+                        alpha: _openingCamera ? 0.35 : 0.2,
+                      ),
+                      child: _openingCamera
+                          ? const SizedBox(
+                              width: 36,
+                              height: 36,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 3,
+                                color: AppColors.cream,
+                              ),
+                            )
+                          : Icon(
+                              _mode == ScanRecordType.qr
+                                  ? Icons.qr_code_scanner_rounded
+                                  : Icons.face_retouching_natural_rounded,
+                              size: 48,
+                              color: AppColors.cream,
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  _openingCamera
+                      ? 'Ouverture de la caméra…'
+                      : _mode == ScanRecordType.qr
+                          ? 'Appuyez pour ouvrir la caméra QR'
+                          : 'Appuyez pour ouvrir la caméra (visage)',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: AppColors.cream,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (_lastResult != null && !_openingCamera) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          _mode == ScanRecordType.qr
+                              ? 'Dernier QR scanné'
+                              : 'Dernière identification',
+                          style: TextStyle(
+                            color: AppColors.creamDark,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _lastResult!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: AppColors.cream,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _faceScanner() {
-    return const Center(child: Text("Face scan bientôt dispo"));
+  Widget _scanCircle({
+    required Color fill,
+    required Widget child,
+  }) {
+    return Container(
+      width: 120,
+      height: 120,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: fill,
+        border: Border.all(color: AppColors.cream, width: 3),
+      ),
+      alignment: Alignment.center,
+      child: child,
+    );
+  }
+
+  Widget _buildHistorySection() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      child: Material(
+        color: context.appCardColor,
+        elevation: 2,
+        shadowColor: AppColors.black.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.history_rounded,
+                    size: 18,
+                    color: context.appTitleAccent,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Scans récents',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: context.appOnSurface,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ...List.generate(_recentScans.length, (i) {
+                final scan = _recentScans[i];
+                final isLast = i == _recentScans.length - 1;
+                return Container(
+                  decoration: BoxDecoration(
+                    border: isLast
+                        ? null
+                        : Border(
+                            bottom: BorderSide(
+                              color: context.appDividerOnPage,
+                              width: 1,
+                            ),
+                          ),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: scan.type == ScanRecordType.qr
+                                    ? (context.isAppDark
+                                        ? AppColors.skyBlueDark
+                                            .withValues(alpha: 0.35)
+                                        : AppColors.lightBlue)
+                                    : context.appIconTileBg,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                scan.type == ScanRecordType.qr
+                                    ? Icons.qr_code_2_rounded
+                                    : Icons.account_circle_outlined,
+                                size: 16,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    scan.value,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: context.appOnSurface,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    scan.type == ScanRecordType.qr
+                                        ? 'QR Code'
+                                        : 'Reconnaissance',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.gray,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        scan.time,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: context.appOnSurfaceMuted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ModeSegment extends StatelessWidget {
+  const _ModeSegment({
+    required this.active,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool active;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: active ? AppColors.primary : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: active
+                    ? AppColors.cream
+                    : context.appTitleAccent,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: active
+                      ? AppColors.cream
+                      : context.appTitleAccent,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
