@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
+import '../coree/face/face_capture_result.dart';
 import 'scan/face_scan_screen.dart';
 import 'scan/live_qr_scan_screen.dart';
 
@@ -68,15 +69,15 @@ class _ScanPageState extends State<ScanPage> {
           setState(() => _lastResult = raw);
         }
       } else {
-        final name = await Navigator.push<String>(
+        final face = await Navigator.push<FaceCaptureResult>(
           context,
           MaterialPageRoute(
             builder: (_) => const FaceScanScreen(),
             fullscreenDialog: true,
           ),
         );
-        if (name != null && mounted) {
-          setState(() => _lastResult = name);
+        if (face != null && face.matched && mounted) {
+          setState(() => _lastResult = face.workerName ?? 'Visage reconnu');
         }
       }
     } finally {

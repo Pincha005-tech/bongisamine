@@ -58,6 +58,18 @@ class AuthController extends ChangeNotifier {
         return 'admin';
       case 'supervisor':
         return 'supervisor';
+      case 'extraction':
+      case 'superviseur.extraction':
+        return 'supervisor_extraction';
+      case 'transport':
+      case 'superviseur.transport':
+        return 'supervisor_transport';
+      case 'reception':
+      case 'superviseur.reception':
+        return 'supervisor_reception';
+      case 'controle':
+      case 'agent.controle':
+        return 'agent_controle';
       case 'agent':
         return 'agent';
       case 'auditor':

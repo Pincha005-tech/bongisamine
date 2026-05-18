@@ -17,7 +17,7 @@ class AuthUser {
   final String id;
   final String name;
   final String email;
-  /// `admin` | `supervisor` | `worker` | `agent` | `auditor` | `state_authority`
+  /// Rôles alignés `mine_back/app/core/roles.py`.
   final String role;
   final String? company;
   final String? accessToken;
@@ -48,8 +48,12 @@ class AuthUser {
     const allowed = <String>{
       'admin',
       'supervisor',
+      'supervisor_extraction',
+      'supervisor_transport',
+      'supervisor_reception',
       'worker',
       'agent',
+      'agent_controle',
       'auditor',
       'state_authority',
     };

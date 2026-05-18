@@ -3,6 +3,14 @@ import 'package:provider/provider.dart';
 
 import '../admin/admin_role_display.dart';
 import '../admin/admin_shell_screen.dart';
+import '../reception/reception_role.dart';
+import '../reception/reception_shell_screen.dart';
+import '../transport/transport_role.dart';
+import '../transport/transport_shell_screen.dart';
+import '../extraction/extraction_role.dart';
+import '../extraction/extraction_shell_screen.dart';
+import '../controle/controle_role.dart';
+import '../controle/controle_shell_screen.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../pages/activities_page.dart';
@@ -48,6 +56,18 @@ class _HomeScreenState extends State<HomeScreen> {
     final auth = context.watch<AuthController>();
     if (roleUsesAdminShell(auth.user?.role)) {
       return const AdminShellScreen();
+    }
+    if (roleUsesReceptionShell(auth.user?.role)) {
+      return const ReceptionShellScreen();
+    }
+    if (roleUsesTransportShell(auth.user?.role)) {
+      return const TransportShellScreen();
+    }
+    if (roleUsesExtractionShell(auth.user?.role)) {
+      return const ExtractionShellScreen();
+    }
+    if (roleUsesControleShell(auth.user?.role)) {
+      return const ControleShellScreen();
     }
 
     final theme = Theme.of(context);

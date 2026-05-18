@@ -5,10 +5,23 @@ import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 import '../../coree/colors/app_colors.dart';
+import '../../coree/face/face_capture_result.dart';
 
-/// Caméra avant + détection de visage (ML Kit). Renvoie un nom si succès.
+/// Caméra avant + détection de visage (ML Kit).
 class FaceScanScreen extends StatefulWidget {
-  const FaceScanScreen({super.key});
+  const FaceScanScreen({
+    super.key,
+    this.title = 'Reconnaissance faciale',
+    this.hint =
+        'Cadrez le visage du travailleur dans l’ovale, puis appuyez sur « Identifier ».',
+    this.actionLabel = 'Identifier le visage',
+    this.knownWorkerNames,
+  });
+
+  final String title;
+  final String hint;
+  final String actionLabel;
+  final List<String>? knownWorkerNames;
 
   @override
   State<FaceScanScreen> createState() => _FaceScanScreenState();
@@ -28,7 +41,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
   String? _error;
   bool _processing = false;
 
-  static const _knownWorkers = [
+  static const _defaultKnownWorkers = [
     'Jean Mukendi',
     'Marie Kabila',
     'Anne Mbuyi',
@@ -106,9 +119,14 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
         return;
       }
 
-      final name =
-          _knownWorkers[math.Random().nextInt(_knownWorkers.length)];
-      Navigator.pop(context, name);
+      final pool = widget.knownWorkerNames ?? _defaultKnownWorkers;
+      final name = pool.isEmpty
+          ? 'Travailleur identifié'
+          : pool[math.Random().nextInt(pool.length)];
+      Navigator.pop(
+        context,
+        FaceCaptureResult(matched: true, workerName: name),
+      );
     } catch (_) {
       if (mounted) {
         _showMessage(
@@ -229,11 +247,11 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
                       icon: const Icon(Icons.close_rounded,
                           color: Colors.white),
                     ),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Reconnaissance faciale',
+                        widget.title,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
@@ -247,10 +265,10 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
               const Spacer(),
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-                child: const Text(
-                  'Cadrez le visage du travailleur dans l’ovale, puis appuyez sur « Identifier ».',
+                child: Text(
+                  widget.hint,
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -280,7 +298,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
                           )
                         : const Icon(Icons.face_retouching_natural_rounded),
                     label: Text(
-                      _processing ? 'Analyse…' : 'Identifier le visage',
+                      _processing ? 'Analyse…' : widget.actionLabel,
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 16,
