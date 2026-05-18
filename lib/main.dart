@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'coree/api/api_config.dart';
 import 'coree/auth/auth_controller.dart';
 import 'coree/routing/native_intent_redirect.dart';
 import 'coree/routes/app_routes.dart';
@@ -12,6 +13,7 @@ import 'coree/theme/theme_notifier.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppThemeController.initialize();
+  await ApiConfig.loadToken();
 
   /// Équivalent `SplashScreen.preventAutoHideAsync` : le splash natif
   /// (`flutter_native_splash`) reste jusqu’au premier frame ; il disparaît

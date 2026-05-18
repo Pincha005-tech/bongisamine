@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../coree/colors/app_colors.dart';
 import '../../coree/theme/app_page_style.dart';
-import '../../services/api_service.Dart';
+import '../../services/api_service.dart';
 
 /// Aligné sur `expo/app/settings/...` (écran données personnelles type `DataAccessPage` Expo).
 class DataAccessPage extends StatefulWidget {

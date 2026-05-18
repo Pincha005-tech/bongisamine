@@ -8,7 +8,7 @@ import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import '../services/api_service.Dart';
+import '../services/api_service.dart';
 import 'changepass_page.dart';
 import 'privacy/privacy_page.dart';
 
@@ -47,6 +47,15 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _loadProfile() async {
+    final auth = context.read<AuthController>();
+    if (auth.user != null) {
+      setState(() {
+        _name = auth.name;
+        _email = auth.email;
+        _role = auth.apiRole.isNotEmpty ? auth.apiRole : auth.role.toUpperCase();
+      });
+      return;
+    }
     final profile = await ApiService.getUserProfile();
     if (!mounted) return;
     setState(() {

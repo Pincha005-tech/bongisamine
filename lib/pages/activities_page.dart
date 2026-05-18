@@ -1,12 +1,9 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import '../services/api_service.Dart';
+import '../services/activity_service.dart';
 
 class ActivityLog {
   const ActivityLog({
@@ -89,7 +86,6 @@ class ActivitiesPage extends StatefulWidget {
 
 class _ActivitiesPageState extends State<ActivitiesPage> {
   static const _pageSize = 5;
-  static const _requestTimeout = Duration(seconds: 5);
 
   final List<ActivityLog> _logs = [];
   bool _isLoading = true;
@@ -109,23 +105,11 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
 
   Future<List<ActivityLog>?> _fetchFromApi(int page) async {
     try {
-      final response = await http
-          .get(
-            Uri.parse('${ApiService.baseUrl}/activities?page=$page'),
+      final items = await ActivityService.fetchPage(page: page, limit: _pageSize);
+      return items
+          .map(
+            (e) => ActivityLog(name: e.name, action: e.action, time: e.time),
           )
-          .timeout(_requestTimeout);
-
-      if (response.statusCode != 200) return null;
-
-      final data = jsonDecode(response.body);
-      if (data is! Map<String, dynamic>) return null;
-
-      final raw = data['activities'];
-      if (raw is! List) return null;
-
-      return raw
-          .whereType<Map>()
-          .map((e) => ActivityLog.fromMap(Map<String, dynamic>.from(e)))
           .toList();
     } catch (_) {
       return null;

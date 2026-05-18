@@ -1,14 +1,24 @@
-import 'dart:math' as math;
-
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 import '../../coree/colors/app_colors.dart';
+import '../../services/face_service.dart';
+import '../../services/worker_service.dart';
 
-/// Caméra avant + détection de visage (ML Kit). Renvoie un nom si succès.
+/// Caméra + détection locale puis envoi API (`/face/recognize` ou `/face/register`).
 class FaceScanScreen extends StatefulWidget {
-  const FaceScanScreen({super.key});
+  const FaceScanScreen({
+    this.registerWorkerId,
+    this.captureOnly = false,
+    super.key,
+  });
+
+  /// Si défini : enregistrement biométrique pour cet ouvrier.
+  final int? registerWorkerId;
+
+  /// Capture photo seulement (chemin fichier) — scan traçabilité superviseur.
+  final bool captureOnly;
 
   @override
   State<FaceScanScreen> createState() => _FaceScanScreenState();
@@ -27,13 +37,6 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
   bool _initializing = true;
   String? _error;
   bool _processing = false;
-
-  static const _knownWorkers = [
-    'Jean Mukendi',
-    'Marie Kabila',
-    'Anne Mbuyi',
-    'David Kasongo',
-  ];
 
   @override
   void initState() {
@@ -100,20 +103,57 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
       if (faces.isEmpty) {
         _showMessage(
           'Aucun visage détecté',
-          'Placez votre visage dans le cadre, avec un bon éclairage, puis réessayez.',
+          'Placez le visage dans le cadre, avec un bon éclairage.',
           isError: true,
         );
         return;
       }
 
-      final name =
-          _knownWorkers[math.Random().nextInt(_knownWorkers.length)];
-      Navigator.pop(context, name);
-    } catch (_) {
+      if (widget.captureOnly) {
+        Navigator.pop(context, photo.path);
+        return;
+      }
+
+      if (widget.registerWorkerId != null) {
+        final reg = await FaceService.register(
+          widget.registerWorkerId!,
+          photo.path,
+        );
+        if (!mounted) return;
+        if (reg.success) {
+          Navigator.pop(context, 'Enregistré (#${widget.registerWorkerId})');
+        } else {
+          _showMessage('Échec', reg.message, isError: true);
+        }
+        return;
+      }
+
+      final result = await FaceService.recognize(photo.path);
+      if (!mounted) return;
+
+      if (result.match && result.workerId != null) {
+        try {
+          final w = await WorkerService.getById(result.workerId!);
+          if (!mounted) return;
+          Navigator.pop(context, w.fullName);
+        } catch (_) {
+          if (!mounted) return;
+          Navigator.pop(context, 'Ouvrier #${result.workerId}');
+        }
+      } else {
+        _showMessage(
+          'Visage non reconnu',
+          result.message.isNotEmpty
+              ? result.message
+              : 'Aucune correspondance en base.',
+          isError: true,
+        );
+      }
+    } catch (e) {
       if (mounted) {
         _showMessage(
-          'Erreur de capture',
-          'Réessayez dans quelques secondes.',
+          'Erreur',
+          e.toString(),
           isError: true,
         );
       }
@@ -147,6 +187,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isRegister = widget.registerWorkerId != null;
     return Scaffold(
       backgroundColor: Colors.black,
       body: _initializing
@@ -155,7 +196,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
             )
           : _error != null
               ? _buildError()
-              : _buildCamera(),
+              : _buildCamera(isRegister),
     );
   }
 
@@ -185,7 +226,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
     );
   }
 
-  Widget _buildCamera() {
+  Widget _buildCamera(bool isRegister) {
     final cam = _camera!;
     final preview = CameraPreview(cam);
     final top = MediaQuery.paddingOf(context).top;
@@ -229,11 +270,13 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
                       icon: const Icon(Icons.close_rounded,
                           color: Colors.white),
                     ),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'Reconnaissance faciale',
+                        isRegister
+                            ? 'Enregistrer le visage'
+                            : 'Reconnaissance faciale',
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
@@ -247,10 +290,12 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
               const Spacer(),
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-                child: const Text(
-                  'Cadrez le visage du travailleur dans l’ovale, puis appuyez sur « Identifier ».',
+                child: Text(
+                  isRegister
+                      ? 'Cadrez le visage de l\'ouvrier pour l\'enregistrement biométrique.'
+                      : 'Cadrez le visage du travailleur dans l\'ovale, puis identifiez.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -280,7 +325,9 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
                           )
                         : const Icon(Icons.face_retouching_natural_rounded),
                     label: Text(
-                      _processing ? 'Analyse…' : 'Identifier le visage',
+                      _processing
+                          ? 'Analyse…'
+                          : (isRegister ? 'Enregistrer' : 'Identifier le visage'),
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 16,

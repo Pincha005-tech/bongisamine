@@ -1,139 +1,45 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import '../coree/api/api_config.dart';
+import '../services/auth_service.dart';
+import '../services/dashboard_service.dart';
 
+/// Façade rétrocompatible — délègue aux services dédiés.
 class ApiService {
-  static const baseUrl = "http://192.168.X.X:8000";
+  static String get baseUrl => ApiConfig.baseUrl;
 
-  /// Inscription (`POST /signup`). Retourne succès + jeton optionnel si le backend en renvoie un.
-  static Future<({bool ok, String? token})> signup({
-    required String name,
-    required String email,
-    required String company,
-    required String password,
-  }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/signup'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': name,
-          'email': email,
-          'company': company,
-          'password': password,
-        }),
-      );
-
-      if (response.statusCode != 200 && response.statusCode != 201) {
-        return (ok: false, token: null);
-      }
-
-      String? token;
-      try {
-        final dynamic data = jsonDecode(response.body);
-        if (data is Map) {
-          token = data['access_token'] as String? ?? data['token'] as String?;
-        }
-      } catch (_) {}
-
-      return (ok: true, token: token);
-    } catch (_) {
-      return (ok: false, token: null);
-    }
-  }
-
-  /// 🔹 QR CODE (TON CODE EXISTANT)
-  static Future<String?> generateQR(int mineralId) async {
-    final response = await http.post(
-      Uri.parse("$baseUrl/qr/mineral/$mineralId"),
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data["qr_path"];
-    } else {
-      return null;
-    }
-  }
-
-  /// 🔹 PROFIL UTILISATEUR
   static Future<Map<String, dynamic>> getUserProfile() async {
     try {
-      final res = await http.get(Uri.parse("$baseUrl/user/profile"));
-
-      if (res.statusCode == 200) {
-        return jsonDecode(res.body);
-      }
-    } catch (e) {}
-
-    /// fallback si backend pas prêt
-    return {
-      "name": "Utilisateur",
-      "email": "email@test.com",
-      "role": "Agent"
-    };
-  }
-
-  /// 🔹 UPDATE PROFIL
-  static Future<bool> updateProfile(String name, String email) async {
-    try {
-      final res = await http.put(
-        Uri.parse("$baseUrl/user/update"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "name": name,
-          "email": email,
-        }),
-      );
-
-      return res.statusCode == 200;
-    } catch (e) {
-      return true; // fallback
+      final me = await AuthService.me();
+      return {
+        'name': me.username,
+        'email': me.username,
+        'role': me.apiRole,
+        'username': me.username,
+        'status': me.status,
+      };
+    } catch (_) {
+      return {
+        'name': 'Utilisateur',
+        'email': '',
+        'role': 'WORKER',
+      };
     }
   }
 
-  /// 🔹 CHANGER MOT DE PASSE
   static Future<bool> changePassword(String oldPass, String newPass) async {
-    try {
-      final res = await http.post(
-        Uri.parse("$baseUrl/user/change-password"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "old_password": oldPass,
-          "new_password": newPass,
-        }),
-      );
-
-      return res.statusCode == 200;
-    } catch (e) {
-      return true;
-    }
+    // Endpoint non exposé par mine_back — à implémenter côté API.
+    return false;
   }
 
-  /// 🔹 DONNÉES UTILISATEUR
-  static Future<Map<String, dynamic>> getUserData() async {
-    try {
-      final res = await http.get(Uri.parse("$baseUrl/user/data"));
-
-      if (res.statusCode == 200) {
-        return jsonDecode(res.body);
-      }
-    } catch (e) {}
-
+  static Future<Map<String, dynamic>> getDashboardStats() async {
+    final s = await DashboardService.stats();
     return {
-      "logs": ["Connexion", "Modification profil"]
+      'workers': s.workers,
+      'minerals': s.minerals,
+      'qrcodes': s.qrcodes,
+      'alerts': s.alerts,
+      'critical_alerts': s.criticalAlerts,
+      'attendances': s.attendances,
+      'lot_movements': s.lotMovements,
     };
-  }
-
-  /// 🔹 SUPPRESSION COMPTE
-  static Future<bool> deleteAccount() async {
-    try {
-      final res = await http.delete(
-        Uri.parse("$baseUrl/user/delete"),
-      );
-
-      return res.statusCode == 200;
-    } catch (e) {
-      return true;
-    }
   }
 }

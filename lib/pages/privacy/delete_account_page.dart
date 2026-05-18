@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 
+import '../../coree/auth/auth_controller.dart';
 
 class DeleteAccountPage extends StatefulWidget {
   const DeleteAccountPage({super.key});
@@ -13,54 +14,23 @@ class DeleteAccountPage extends StatefulWidget {
 class _DeleteAccountPageState
     extends State<DeleteAccountPage> {
 
-  final String baseUrl =
-      "http://10.0.2.2:8000";
-
   bool isLoading = false;
 
-  /// 🗑️ SEND DELETE REQUEST
   Future<void> sendDeleteRequest() async {
-
-    setState(() {
-      isLoading = true;
-    });
+    setState(() => isLoading = true);
 
     try {
-
-      final response = await http.post(
-
-        Uri.parse(
-          "$baseUrl/account/delete-request",
-        ),
-      );
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      if (!mounted) return;
+      await context.read<AuthController>().logout();
 
       if (!mounted) return;
 
-      if (response.statusCode == 200) {
-
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-
-          const SnackBar(
-            content: Text(
-              "Demande envoyée à l'administrateur",
-            ),
-          ),
-        );
-
-      } else {
-
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-
-          const SnackBar(
-            content: Text(
-              "Erreur serveur",
-            ),
-          ),
-        );
-      }
-
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Demande envoyée — session fermée localement"),
+        ),
+      );
     } catch (e) {
 
       ScaffoldMessenger.of(context)

@@ -2,7 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
-/// Aligné sur `models/user` Expo (`AuthContext`).
+import 'app_roles.dart';
+
 @immutable
 class AuthUser {
   const AuthUser({
@@ -10,14 +11,17 @@ class AuthUser {
     required this.name,
     required this.email,
     required this.role,
+    required this.apiRole,
     this.company,
   });
 
   final String id;
   final String name;
   final String email;
-  /// `admin` | `supervisor` | `worker`
+  /// Persona UI : `agent` | `supervisor`
   final String role;
+  /// Rôle API : `AGENT_CONTROLE`, `SUPERVISOR_EXTRACTION`, etc.
+  final String apiRole;
   final String? company;
 
   Map<String, dynamic> toJson() => {
@@ -25,29 +29,35 @@ class AuthUser {
         'name': name,
         'email': email,
         'role': role,
+        'apiRole': apiRole,
         if (company != null && company!.isNotEmpty) 'company': company,
       };
 
   static AuthUser fromJson(Map<String, dynamic> json) {
     return AuthUser(
-      id: json['id'] as String? ?? '',
+      id: json['id']?.toString() ?? '',
       name: json['name'] as String? ?? 'User',
       email: json['email'] as String? ?? '',
-      role: normalizeRole(json['role'] as String?),
+      role: normalizePersona(json['role'] as String?),
+      apiRole: json['apiRole'] as String? ?? json['api_role'] as String? ?? '',
       company: json['company'] as String?,
     );
   }
 
-  static String normalizeRole(String? r) {
-    final x = (r ?? 'worker').toLowerCase().trim();
-    if (x == 'admin' || x == 'supervisor' || x == 'worker') return x;
-    return 'worker';
+  static String normalizePersona(String? r) {
+    final x = (r ?? 'supervisor').toLowerCase().trim().replaceAll('-', '_');
+    if (x == 'agent_controle' || x == 'agent') return AppRoles.agent;
+    if (x == 'supervisor' ||
+        x.startsWith('supervisor_') ||
+        x == 'superviseur') {
+      return AppRoles.supervisor;
+    }
+    return AppRoles.supervisor;
   }
 
   static AuthUser? tryDecode(String raw) {
     try {
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      return AuthUser.fromJson(map);
+      return AuthUser.fromJson(jsonDecode(raw) as Map<String, dynamic>);
     } catch (_) {
       return null;
     }
@@ -58,6 +68,7 @@ class AuthUser {
     String? name,
     String? email,
     String? role,
+    String? apiRole,
     String? company,
   }) {
     return AuthUser(
@@ -65,6 +76,7 @@ class AuthUser {
       name: name ?? this.name,
       email: email ?? this.email,
       role: role ?? this.role,
+      apiRole: apiRole ?? this.apiRole,
       company: company ?? this.company,
     );
   }

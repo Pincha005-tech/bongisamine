@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
-import '../services/api_service.Dart';
+import '../services/api_service.dart';
+import '../services/dashboard_service.dart';
+import '../models/dashboard_stats.dart';
 
 /// Données alignées sur `expo/app/(tabs)/dashboard.tsx`
 const List<_BarDatum> _barData = [
@@ -63,11 +65,28 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   String _userName = 'Utilisateur';
+  DashboardStats? _stats;
+  bool _statsLoading = true;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_loadUserName());
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    await _loadUserName();
+    try {
+      final s = await DashboardService.stats();
+      if (mounted) {
+        setState(() {
+          _stats = s;
+          _statsLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _statsLoading = false);
+    }
   }
 
   Future<void> _loadUserName() async {
@@ -77,10 +96,7 @@ class _DashboardPageState extends State<DashboardPage> {
     setState(() => _userName = name);
   }
 
-  Future<void> _onRefresh() async {
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
-    await _loadUserName();
-  }
+  Future<void> _onRefresh() async => _load();
 
   @override
   Widget build(BuildContext context) {
@@ -158,9 +174,11 @@ class _DashboardPageState extends State<DashboardPage> {
                           child: _StatCard(
                             icon: Icons.groups_rounded,
                             label: 'Travailleurs',
-                            value: '1 247',
-                            change: '+3,2 %',
-                            changeHint: 'vs semaine dernière',
+                            value: _stats != null
+                                ? '${_stats!.workers}'
+                                : (_statsLoading ? '…' : '—'),
+                            change: 'API',
+                            changeHint: 'base serveur',
                             up: true,
                           ),
                         ),
@@ -168,10 +186,12 @@ class _DashboardPageState extends State<DashboardPage> {
                           width: w,
                           child: _StatCard(
                             icon: Icons.document_scanner_outlined,
-                            label: 'Scans aujourd\'hui',
-                            value: '856',
-                            change: '+12 %',
-                            changeHint: 'vs hier (764)',
+                            label: 'Mouvements lots',
+                            value: _stats != null
+                                ? '${_stats!.lotMovements}'
+                                : (_statsLoading ? '…' : '—'),
+                            change: 'API',
+                            changeHint: 'traçabilité',
                             up: true,
                           ),
                         ),
@@ -179,21 +199,25 @@ class _DashboardPageState extends State<DashboardPage> {
                           width: w,
                           child: _StatCard(
                             icon: Icons.verified_user_outlined,
-                            label: 'Taux de présence',
-                            value: '98,2 %',
-                            change: '-0,4 pt',
-                            changeHint: 'objectif site : 97 %',
-                            up: false,
+                            label: 'Présences',
+                            value: _stats != null
+                                ? '${_stats!.attendances}'
+                                : (_statsLoading ? '…' : '—'),
+                            change: 'API',
+                            changeHint: 'enregistrements',
+                            up: true,
                           ),
                         ),
                         SizedBox(
                           width: w,
                           child: _StatCard(
                             icon: Icons.trending_up_rounded,
-                            label: 'Indice productivité',
-                            value: '${_monthlyProductivity.last.value}',
-                            change: '+5,1 %',
-                            changeHint: 'sur 100 (mois en cours)',
+                            label: 'QR actifs',
+                            value: _stats != null
+                                ? '${_stats!.qrcodes}'
+                                : (_statsLoading ? '…' : '—'),
+                            change: '${_stats?.alerts ?? 0} alertes',
+                            changeHint: 'dont ${_stats?.criticalAlerts ?? 0} critiques',
                             up: true,
                           ),
                         ),

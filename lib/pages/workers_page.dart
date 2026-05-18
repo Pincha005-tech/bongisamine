@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
+import '../models/worker_model.dart';
+import '../services/worker_service.dart';
 
 /// Aligné sur `expo/app/(tabs)/workers.tsx`
 enum WorkerStatus { active, inactive, onLeave }
@@ -26,64 +27,15 @@ class WorkerItem {
   final String lastScan;
 }
 
-const List<WorkerItem> _mockWorkers = [
-  WorkerItem(
-    id: '1',
-    name: 'Jean Mukendi',
+WorkerItem _workerFromModel(WorkerModel w) {
+  return WorkerItem(
+    id: w.id.toString(),
+    name: w.fullName,
     status: WorkerStatus.active,
-    department: 'Extraction',
-    lastScan: '07:42',
-  ),
-  WorkerItem(
-    id: '2',
-    name: 'Marie Kabila',
-    status: WorkerStatus.active,
-    department: 'Sécurité',
-    lastScan: '07:38',
-  ),
-  WorkerItem(
-    id: '3',
-    name: 'Pierre Tshibangu',
-    status: WorkerStatus.onLeave,
-    department: 'Maintenance',
-    lastScan: '—',
-  ),
-  WorkerItem(
-    id: '4',
-    name: 'Anne Mbuyi',
-    status: WorkerStatus.active,
-    department: 'Extraction',
-    lastScan: '08:01',
-  ),
-  WorkerItem(
-    id: '5',
-    name: 'Charles Ilunga',
-    status: WorkerStatus.inactive,
-    department: 'Logistique',
-    lastScan: 'Hier',
-  ),
-  WorkerItem(
-    id: '6',
-    name: 'Grace Lumba',
-    status: WorkerStatus.active,
-    department: 'Sécurité',
-    lastScan: '07:55',
-  ),
-  WorkerItem(
-    id: '7',
-    name: 'David Kasongo',
-    status: WorkerStatus.active,
-    department: 'Extraction',
-    lastScan: '08:10',
-  ),
-  WorkerItem(
-    id: '8',
-    name: 'Sophie Ngalula',
-    status: WorkerStatus.onLeave,
-    department: 'Maintenance',
-    lastScan: '—',
-  ),
-];
+    department: w.departmentRole ?? w.role,
+    lastScan: w.badgeId,
+  );
+}
 
 String _anonymize(String name) {
   final parts = name.trim().split(RegExp(r'\s+'));
@@ -129,13 +81,11 @@ class _WorkersPageState extends State<WorkersPage> {
   final TextEditingController _queryController = TextEditingController();
 
   _WorkersFilters _filters = const _WorkersFilters();
-  List<WorkerItem> _filtered = List<WorkerItem>.from(_mockWorkers);
-
-  static final List<String> _departments = _mockWorkers
-      .map((w) => w.department)
-      .toSet()
-      .toList()
-    ..sort();
+  List<WorkerItem> _allWorkers = [];
+  List<WorkerItem> _filtered = [];
+  List<String> _departments = [];
+  bool _loading = true;
+  String? _loadError;
 
   bool get _isSupervisor => UserRoleController.role == 'supervisor';
 
@@ -145,7 +95,33 @@ class _WorkersPageState extends State<WorkersPage> {
   void initState() {
     super.initState();
     _queryController.addListener(_applyFilter);
-    _applyFilter();
+    _loadWorkers();
+  }
+
+  Future<void> _loadWorkers() async {
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    try {
+      final page = await WorkerService.paginated(page: 1, limit: 100);
+      final items = page.data.map(_workerFromModel).toList();
+      if (!mounted) return;
+      setState(() {
+        _allWorkers = items;
+        _departments = items.map((w) => w.department).toSet().toList()..sort();
+        _loading = false;
+      });
+      _applyFilter();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = 'Impossible de charger les ouvriers';
+        _allWorkers = [];
+        _filtered = [];
+      });
+    }
   }
 
   @override
@@ -158,7 +134,7 @@ class _WorkersPageState extends State<WorkersPage> {
   void _applyFilter() {
     final q = _queryController.text.trim().toLowerCase();
     setState(() {
-      _filtered = _mockWorkers.where((w) {
+      _filtered = _allWorkers.where((w) {
         if (q.isNotEmpty &&
             !w.name.toLowerCase().contains(q) &&
             !w.department.toLowerCase().contains(q)) {
@@ -414,12 +390,9 @@ class _WorkersPageState extends State<WorkersPage> {
   }
 
   int get _activeCount =>
-      _mockWorkers.where((w) => w.status == WorkerStatus.active).length;
+      _allWorkers.where((w) => w.status == WorkerStatus.active).length;
 
-  Future<void> _onRefresh() async {
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
-    if (mounted) setState(() {});
-  }
+  Future<void> _onRefresh() async => _loadWorkers();
 
   String _displayName(WorkerItem w) {
     if (_isSupervisor) return _anonymize(w.name);
@@ -526,7 +499,11 @@ class _WorkersPageState extends State<WorkersPage> {
             ),
           const SizedBox(height: 12),
           Expanded(
-            child: RefreshIndicator(
+            child: _loading
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.primary),
+                  )
+                : RefreshIndicator(
               color: AppColors.primary,
               onRefresh: _onRefresh,
               child: _filtered.isEmpty
@@ -543,7 +520,8 @@ class _WorkersPageState extends State<WorkersPage> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'Aucun travailleur ne correspond aux critères.',
+                          _loadError ??
+                              'Aucun travailleur ne correspond aux critères.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 14,

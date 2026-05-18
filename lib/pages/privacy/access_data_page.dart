@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
-import '../../coree/theme/app_themes.dart';
-import '../../coree/colors/app_colors.dart';
-
 
 class SecurityPage extends StatefulWidget {
   const SecurityPage({super.key});

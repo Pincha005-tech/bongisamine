@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/routes/app_routes.dart';
 
@@ -65,7 +67,12 @@ class _StartScreenState extends State<StartScreen>
 
     _navTimer = Timer(const Duration(seconds: 3), () {
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, AppRoutes.login);
+      final auth = context.read<AuthController>();
+      if (auth.isLoggedIn) {
+        Navigator.pushReplacementNamed(context, AppRoutes.home);
+      } else {
+        Navigator.pushReplacementNamed(context, AppRoutes.login);
+      }
     });
   }
 

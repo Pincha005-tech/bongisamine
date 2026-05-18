@@ -4,11 +4,13 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../api/api_config.dart';
+import '../api/api_exception.dart';
+import '../../services/auth_service.dart';
 import '../theme/theme_notifier.dart';
+import 'app_roles.dart';
 import 'auth_user.dart';
 
-/// Équivalent Expo [`AuthContext.tsx`](contexts/AuthContext) : session locale,
-/// persistance `bongisa_user`, login / signup mock, `setRole`, `logout`.
 class AuthController extends ChangeNotifier {
   AuthController() {
     unawaited(_bootstrap());
@@ -18,29 +20,40 @@ class AuthController extends ChangeNotifier {
 
   AuthUser? user;
   bool isLoading = true;
+  String? lastError;
 
-  /// Rôle « contexte » (comme `role` dans le hook Expo), utilisé au prochain login.
-  String _role = 'worker';
+  String _persona = AppRoles.supervisor;
 
   bool get isLoggedIn => user != null;
-
-  String get role => _role;
-
-  /// Rétrocompat écrans existants.
+  String get role => _persona;
+  String get apiRole => user?.apiRole ?? '';
   String get name => user?.name ?? 'Utilisateur';
   String get email => user?.email ?? '';
   String? get company => user?.company;
   bool get isAuthenticated => isLoggedIn;
+  bool get isAgent => _persona == AppRoles.agent;
+  bool get isSupervisor => _persona == AppRoles.supervisor;
 
   Future<void> _bootstrap() async {
     try {
+      await ApiConfig.loadToken();
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_prefsKey);
-      if (raw != null && raw.isNotEmpty) {
-        final u = AuthUser.tryDecode(raw);
-        if (u != null) {
-          user = u;
-          _role = AuthUser.normalizeRole(u.role);
+      if (ApiConfig.token != null && raw != null && raw.isNotEmpty) {
+        final stored = AuthUser.tryDecode(raw);
+        if (stored != null) {
+          try {
+            final me = await AuthService.me();
+            user = stored.copyWith(
+              apiRole: me.apiRole,
+              name: me.username,
+              email: me.username,
+            );
+            _persona = stored.role;
+          } catch (_) {
+            user = stored;
+            _persona = stored.role;
+          }
         }
       }
     } catch (_) {}
@@ -50,8 +63,7 @@ class AuthController extends ChangeNotifier {
   }
 
   void _syncStaticRole() {
-    UserRoleController.role =
-        _role == 'supervisor' ? 'supervisor' : _role;
+    UserRoleController.role = _persona;
   }
 
   Future<void> _persist() async {
@@ -61,55 +73,62 @@ class AuthController extends ChangeNotifier {
     await prefs.setString(_prefsKey, jsonEncode(u.toJson()));
   }
 
-  /// Expo : délai 800 ms, email non vide + mot de passe ≥ 4, rôle = `role` courant.
-  Future<bool> login(String email, String password) async {
-    await Future<void>.delayed(const Duration(milliseconds: 800));
-    final e = email.trim();
-    if (e.isNotEmpty && password.length >= 4) {
-      final part = e.split('@').first;
-      final displayName = part.isNotEmpty ? part : 'User';
+  /// Connexion API : [username] + [password], persona = agent ou superviseur.
+  Future<bool> login(String username, String password) async {
+    lastError = null;
+    final u = username.trim();
+    if (u.isEmpty || password.length < 4) {
+      lastError = 'Identifiants invalides';
+      return false;
+    }
+
+    try {
+      final result = await AuthService.login(u, password);
+
+      if (!AppRoles.matchesPersona(_persona, result.apiRole)) {
+        await AuthService.logout();
+        lastError = _persona == AppRoles.agent
+            ? 'Ce compte n\'est pas un agent de contrôle'
+            : 'Ce compte n\'est pas un superviseur';
+        return false;
+      }
+
       user = AuthUser(
-        id: 'u-${DateTime.now().millisecondsSinceEpoch}',
-        name: displayName,
-        email: e,
-        role: AuthUser.normalizeRole(_role),
+        id: result.userId.toString(),
+        name: result.username,
+        email: result.username,
+        role: _persona,
+        apiRole: result.apiRole,
       );
       await _persist();
       _syncStaticRole();
       notifyListeners();
       return true;
+    } on ApiException catch (e) {
+      lastError = e.message;
+      notifyListeners();
+      return false;
+    } catch (_) {
+      lastError = 'Impossible de joindre le serveur';
+      notifyListeners();
+      return false;
     }
-    return false;
   }
 
-  /// Expo : délai 1000 ms, rôle `worker`, entreprise optionnelle.
   Future<bool> signup(
     String name,
     String email,
     String company,
     String password,
   ) async {
-    await Future<void>.delayed(const Duration(milliseconds: 1000));
-    final n = name.trim();
-    final e = email.trim();
-    if (n.isNotEmpty && e.isNotEmpty && password.length >= 4) {
-      _role = 'worker';
-      user = AuthUser(
-        id: 'u-${DateTime.now().millisecondsSinceEpoch}',
-        name: n,
-        email: e,
-        role: 'worker',
-        company: company.trim().isEmpty ? null : company.trim(),
-      );
-      await _persist();
-      _syncStaticRole();
-      notifyListeners();
-      return true;
-    }
+    lastError =
+        'Inscription désactivée sur mobile — contactez l\'administrateur.';
+    notifyListeners();
     return false;
   }
 
   Future<void> logout() async {
+    await AuthService.logout();
     user = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefsKey);
@@ -117,19 +136,20 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Expo : met à jour le rôle + persiste si un utilisateur est connecté.
-  void setRole(String newRole) {
-    _role = AuthUser.normalizeRole(newRole);
-    if (user != null) {
-      user = user!.copyWith(role: _role);
-      unawaited(_persist());
+  void setPersona(String persona) {
+    final p = AuthUser.normalizePersona(persona);
+    if (p == AppRoles.agent || p == AppRoles.supervisor) {
+      _persona = p;
+      if (user != null) {
+        user = user!.copyWith(role: p);
+        unawaited(_persist());
+      }
+      _syncStaticRole();
+      notifyListeners();
     }
-    _syncStaticRole();
-    notifyListeners();
   }
 }
 
-/// Placeholder pour un futur client type TanStack Query (cache HTTP, etc.).
 class AppQueryClient {
   const AppQueryClient();
 }

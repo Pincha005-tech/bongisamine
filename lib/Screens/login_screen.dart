@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
+import '../coree/auth/app_roles.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/routes/app_routes.dart';
 import '../widgets/app_logo.dart';
@@ -21,6 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _busy = false;
   String _error = '';
+  String _persona = AppRoles.supervisor;
 
   @override
   void dispose() {
@@ -36,8 +38,9 @@ class _LoginScreenState extends State<LoginScreen> {
       _busy = true;
     });
     final auth = context.read<AuthController>();
+    auth.setPersona(_persona);
     final ok = await auth.login(
-      _emailController.text,
+      _emailController.text.trim(),
       _passwordController.text,
     );
     if (!mounted) return;
@@ -45,7 +48,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (ok) {
       Navigator.pushReplacementNamed(context, AppRoutes.home);
     } else {
-      setState(() => _error = 'Connexion impossible');
+      setState(() => _error = auth.lastError ?? 'Connexion impossible');
     }
   }
 
@@ -98,6 +101,39 @@ class _LoginScreenState extends State<LoginScreen> {
                         color: theme.textTheme.bodyLarge?.color,
                       ),
                     ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Profil terrain',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: theme.textTheme.bodySmall?.color,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _PersonaChip(
+                            label: AppRoles.label(AppRoles.supervisor),
+                            icon: Icons.engineering_rounded,
+                            selected: _persona == AppRoles.supervisor,
+                            onTap: () =>
+                                setState(() => _persona = AppRoles.supervisor),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _PersonaChip(
+                            label: AppRoles.label(AppRoles.agent),
+                            icon: Icons.verified_user_rounded,
+                            selected: _persona == AppRoles.agent,
+                            onTap: () =>
+                                setState(() => _persona = AppRoles.agent),
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 20),
                     if (_error.isNotEmpty) ...[
                       Text(
@@ -112,9 +148,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 12),
                     ],
                     _input(
-                      hint: 'Email',
-                      icon: Icons.email,
+                      hint: 'Identifiant',
+                      icon: Icons.person_outline,
                       controller: _emailController,
+                      isUsername: true,
                     ),
                     const SizedBox(height: 15),
                     _input(
@@ -210,6 +247,7 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData icon,
     required TextEditingController controller,
     bool isPassword = false,
+    bool isUsername = false,
   }) {
     return TextFormField(
       controller: controller,
@@ -217,12 +255,6 @@ class _LoginScreenState extends State<LoginScreen> {
       validator: (value) {
         if (value == null || value.isEmpty) {
           return 'Champ requis';
-        }
-        if (hint == 'Email') {
-          final emailRegex = RegExp(r'^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$');
-          if (!emailRegex.hasMatch(value)) {
-            return 'Email invalide';
-          }
         }
         if (isPassword && value.length < 4) {
           return 'Au moins 4 caractères';
@@ -245,6 +277,60 @@ class _LoginScreenState extends State<LoginScreen> {
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(
             color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PersonaChip extends StatelessWidget {
+  const _PersonaChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+
+    return Material(
+      color: selected ? primary.withValues(alpha: 0.12) : theme.cardColor,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? primary : theme.dividerColor,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: selected ? primary : theme.iconTheme.color),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? primary : theme.textTheme.bodyMedium?.color,
+                ),
+              ),
+            ],
           ),
         ),
       ),

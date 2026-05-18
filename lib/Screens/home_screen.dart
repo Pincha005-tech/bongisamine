@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../coree/auth/app_roles.dart';
+import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../pages/activities_page.dart';
+import '../pages/attendance_page.dart';
 import '../pages/dashboard_page.dart';
 import '../pages/scan_page.dart';
 import '../pages/security_page.dart';
 import '../pages/workers_page.dart';
 
-/// Équivalent Expo `app/(tabs)/_layout.tsx` (barre d’onglets ; pas l’écran `activities.tsx`).
+/// Shell principal : navigation adaptée au persona (agent / superviseur).
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -18,14 +22,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int currentIndex = 0;
 
-  final List<Widget> pages = const [
-    DashboardPage(),
-    WorkersPage(),
-    ScanPage(),
-    ActivitiesPage(),
-    SettingsPage(),
-  ];
-
   static const double _tabBarHeight = 72;
   static const double _iconSize = 24;
 
@@ -35,34 +31,108 @@ class _HomeScreenState extends State<HomeScreen> {
     height: 1.1,
   );
 
+  List<Widget> _pagesFor(String persona) {
+    if (persona == AppRoles.agent) {
+      return const [
+        DashboardPage(),
+        WorkersPage(),
+        ScanPage(),
+        AttendancePage(),
+        SettingsPage(),
+      ];
+    }
+    return const [
+      DashboardPage(),
+      WorkersPage(),
+      ScanPage(),
+      ActivitiesPage(),
+      SettingsPage(),
+    ];
+  }
+
+  List<BottomNavigationBarItem> _itemsFor(String persona) {
+    if (persona == AppRoles.agent) {
+      return const [
+        BottomNavigationBarItem(
+          icon: Icon(Icons.bar_chart_rounded, size: _iconSize),
+          label: 'Tableau',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.groups_rounded, size: _iconSize),
+          label: 'Ouvriers',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.face_retouching_natural_rounded, size: _iconSize),
+          label: 'Visage',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.fact_check_rounded, size: _iconSize),
+          label: 'Présences',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.settings_rounded, size: _iconSize),
+          label: 'Paramètres',
+        ),
+      ];
+    }
+    return const [
+      BottomNavigationBarItem(
+        icon: Icon(Icons.bar_chart_rounded, size: _iconSize),
+        label: 'Tableau',
+      ),
+      BottomNavigationBarItem(
+        icon: Icon(Icons.groups_rounded, size: _iconSize),
+        label: 'Travailleurs',
+      ),
+      BottomNavigationBarItem(
+        icon: Icon(Icons.qr_code_2_rounded, size: _iconSize),
+        label: 'Scan',
+      ),
+      BottomNavigationBarItem(
+        icon: Icon(Icons.monitor_heart_outlined, size: _iconSize),
+        label: 'Activités',
+      ),
+      BottomNavigationBarItem(
+        icon: Icon(Icons.settings_rounded, size: _iconSize),
+        label: 'Paramètres',
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final auth = context.watch<AuthController>();
+    final persona = auth.role;
+    final pages = _pagesFor(persona);
+    final items = _itemsFor(persona);
 
+    if (currentIndex >= pages.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => currentIndex = 0);
+      });
+    }
+
+    final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final barSurface = isDark ? AppColors.darkCard : AppColors.white;
-    final barBorder =
-        isDark ? AppColors.grayDark : AppColors.creamDark;
+    final barBorder = isDark ? AppColors.grayDark : AppColors.creamDark;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-      body: pages[currentIndex],
+      body: pages[currentIndex.clamp(0, pages.length - 1)],
       bottomNavigationBar: Material(
         elevation: 4,
         shadowColor: AppColors.black.withValues(alpha: 0.05),
         color: barSurface,
         child: Container(
           decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(color: barBorder, width: 1),
-            ),
+            border: Border(top: BorderSide(color: barBorder, width: 1)),
           ),
           child: SafeArea(
             top: false,
             child: SizedBox(
               height: _tabBarHeight,
               child: Padding(
-                /// Expo `tabBarStyle`: paddingTop / paddingBottom 8
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
                 child: Theme(
                   data: theme.copyWith(
@@ -70,7 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     highlightColor: AppColors.primary.withValues(alpha: 0.05),
                   ),
                   child: BottomNavigationBar(
-                    currentIndex: currentIndex,
+                    currentIndex: currentIndex.clamp(0, items.length - 1),
                     type: BottomNavigationBarType.fixed,
                     elevation: 0,
                     backgroundColor: Colors.transparent,
@@ -81,32 +151,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     selectedLabelStyle: _tabLabelStyle,
                     unselectedLabelStyle: _tabLabelStyle,
                     iconSize: _iconSize,
-                    onTap: (index) {
-                      setState(() => currentIndex = index);
-                    },
-                    items: const [
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.bar_chart_rounded, size: _iconSize),
-                        label: 'Tableau',
-                      ),
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.groups_rounded, size: _iconSize),
-                        label: 'Travailleurs',
-                      ),
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.qr_code_2_rounded, size: _iconSize),
-                        label: 'Scan',
-                      ),
-                      BottomNavigationBarItem(
-                        /// Lucide `Activity` : courbe type « pouls » (distinct de BarChart3).
-                        icon: Icon(Icons.monitor_heart_outlined, size: _iconSize),
-                        label: 'Activités',
-                      ),
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.settings_rounded, size: _iconSize),
-                        label: 'Paramètres',
-                      ),
-                    ],
+                    onTap: (index) => setState(() => currentIndex = index),
+                    items: items,
                   ),
                 ),
               ),
