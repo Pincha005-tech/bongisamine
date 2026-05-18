@@ -3,28 +3,7 @@ import 'package:flutter/material.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-
-/// Aligné sur `expo/app/(tabs)/workers.tsx`
-enum WorkerStatus { active, inactive, onLeave }
-
-/// Tri alphabétique sur le nom complet.
-enum WorkerNameSort { ascending, descending }
-
-class WorkerItem {
-  const WorkerItem({
-    required this.id,
-    required this.name,
-    required this.status,
-    required this.department,
-    required this.lastScan,
-  });
-
-  final String id;
-  final String name;
-  final WorkerStatus status;
-  final String department;
-  final String lastScan;
-}
+import '../models/worker_item.dart';
 
 const List<WorkerItem> _mockWorkers = [
   WorkerItem(
@@ -129,14 +108,13 @@ class _WorkersPageState extends State<WorkersPage> {
   final TextEditingController _queryController = TextEditingController();
 
   _WorkersFilters _filters = const _WorkersFilters();
+  List<WorkerItem> _allWorkers = List<WorkerItem>.from(_mockWorkers);
   List<WorkerItem> _filtered = List<WorkerItem>.from(_mockWorkers);
-
-  static final List<String> _departments = _mockWorkers
+  List<String> _departments = _mockWorkers
       .map((w) => w.department)
       .toSet()
       .toList()
     ..sort();
-
   bool get _isSupervisor => UserRoleController.role == 'supervisor';
 
   bool get _hasActiveFilters => !_filters.isEmpty;
@@ -158,7 +136,7 @@ class _WorkersPageState extends State<WorkersPage> {
   void _applyFilter() {
     final q = _queryController.text.trim().toLowerCase();
     setState(() {
-      _filtered = _mockWorkers.where((w) {
+      _filtered = _allWorkers.where((w) {
         if (q.isNotEmpty &&
             !w.name.toLowerCase().contains(q) &&
             !w.department.toLowerCase().contains(q)) {
@@ -414,11 +392,11 @@ class _WorkersPageState extends State<WorkersPage> {
   }
 
   int get _activeCount =>
-      _mockWorkers.where((w) => w.status == WorkerStatus.active).length;
+      _allWorkers.where((w) => w.status == WorkerStatus.active).length;
 
   Future<void> _onRefresh() async {
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
-    if (mounted) setState(() {});
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    if (mounted) _applyFilter();
   }
 
   String _displayName(WorkerItem w) {

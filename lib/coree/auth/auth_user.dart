@@ -11,14 +11,16 @@ class AuthUser {
     required this.email,
     required this.role,
     this.company,
+    this.accessToken,
   });
 
   final String id;
   final String name;
   final String email;
-  /// `admin` | `supervisor` | `worker`
+  /// `admin` | `supervisor` | `worker` | `agent` | `auditor` | `state_authority`
   final String role;
   final String? company;
+  final String? accessToken;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -26,6 +28,8 @@ class AuthUser {
         'email': email,
         'role': role,
         if (company != null && company!.isNotEmpty) 'company': company,
+        if (accessToken != null && accessToken!.isNotEmpty)
+          'access_token': accessToken,
       };
 
   static AuthUser fromJson(Map<String, dynamic> json) {
@@ -35,12 +39,21 @@ class AuthUser {
       email: json['email'] as String? ?? '',
       role: normalizeRole(json['role'] as String?),
       company: json['company'] as String?,
+      accessToken: json['access_token'] as String?,
     );
   }
 
   static String normalizeRole(String? r) {
     final x = (r ?? 'worker').toLowerCase().trim();
-    if (x == 'admin' || x == 'supervisor' || x == 'worker') return x;
+    const allowed = <String>{
+      'admin',
+      'supervisor',
+      'worker',
+      'agent',
+      'auditor',
+      'state_authority',
+    };
+    if (allowed.contains(x)) return x;
     return 'worker';
   }
 
@@ -59,6 +72,7 @@ class AuthUser {
     String? email,
     String? role,
     String? company,
+    String? accessToken,
   }) {
     return AuthUser(
       id: id ?? this.id,
@@ -66,6 +80,7 @@ class AuthUser {
       email: email ?? this.email,
       role: role ?? this.role,
       company: company ?? this.company,
+      accessToken: accessToken ?? this.accessToken,
     );
   }
 }

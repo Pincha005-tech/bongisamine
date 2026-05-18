@@ -7,8 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/theme_notifier.dart';
 import 'auth_user.dart';
 
-/// Équivalent Expo [`AuthContext.tsx`](contexts/AuthContext) : session locale,
-/// persistance `bongisa_user`, login / signup mock, `setRole`, `logout`.
+/// Session locale (mock) — persistance `bongisa_user`, sans appel backend.
 class AuthController extends ChangeNotifier {
   AuthController() {
     unawaited(_bootstrap());
@@ -19,14 +18,12 @@ class AuthController extends ChangeNotifier {
   AuthUser? user;
   bool isLoading = true;
 
-  /// Rôle « contexte » (comme `role` dans le hook Expo), utilisé au prochain login.
   String _role = 'worker';
 
   bool get isLoggedIn => user != null;
 
   String get role => _role;
 
-  /// Rétrocompat écrans existants.
   String get name => user?.name ?? 'Utilisateur';
   String get email => user?.email ?? '';
   String? get company => user?.company;
@@ -50,8 +47,28 @@ class AuthController extends ChangeNotifier {
   }
 
   void _syncStaticRole() {
-    UserRoleController.role =
-        _role == 'supervisor' ? 'supervisor' : _role;
+    UserRoleController.role = _role;
+  }
+
+  /// Démo : partie locale de l’email → rôle (`admin@…`, `supervisor@…`, etc.).
+  static String resolveRoleFromEmail(String email) {
+    final local = email.trim().split('@').first.toLowerCase();
+    switch (local) {
+      case 'admin':
+        return 'admin';
+      case 'supervisor':
+        return 'supervisor';
+      case 'agent':
+        return 'agent';
+      case 'auditor':
+        return 'auditor';
+      case 'state':
+      case 'autorite':
+      case 'etat':
+        return 'state_authority';
+      default:
+        return 'worker';
+    }
   }
 
   Future<void> _persist() async {
@@ -61,13 +78,15 @@ class AuthController extends ChangeNotifier {
     await prefs.setString(_prefsKey, jsonEncode(u.toJson()));
   }
 
-  /// Expo : délai 800 ms, email non vide + mot de passe ≥ 4, rôle = `role` courant.
   Future<bool> login(String email, String password) async {
     await Future<void>.delayed(const Duration(milliseconds: 800));
     final e = email.trim();
     if (e.isNotEmpty && password.length >= 4) {
+      _role = resolveRoleFromEmail(e);
       final part = e.split('@').first;
-      final displayName = part.isNotEmpty ? part : 'User';
+      final displayName = part.isEmpty
+          ? 'Utilisateur'
+          : '${part[0].toUpperCase()}${part.length > 1 ? part.substring(1).toLowerCase() : ''}';
       user = AuthUser(
         id: 'u-${DateTime.now().millisecondsSinceEpoch}',
         name: displayName,
@@ -82,7 +101,6 @@ class AuthController extends ChangeNotifier {
     return false;
   }
 
-  /// Expo : délai 1000 ms, rôle `worker`, entreprise optionnelle.
   Future<bool> signup(
     String name,
     String email,
@@ -111,13 +129,13 @@ class AuthController extends ChangeNotifier {
 
   Future<void> logout() async {
     user = null;
+    _role = 'worker';
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefsKey);
     _syncStaticRole();
     notifyListeners();
   }
 
-  /// Expo : met à jour le rôle + persiste si un utilisateur est connecté.
   void setRole(String newRole) {
     _role = AuthUser.normalizeRole(newRole);
     if (user != null) {
@@ -129,7 +147,6 @@ class AuthController extends ChangeNotifier {
   }
 }
 
-/// Placeholder pour un futur client type TanStack Query (cache HTTP, etc.).
 class AppQueryClient {
   const AppQueryClient();
 }

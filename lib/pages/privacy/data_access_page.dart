@@ -1,10 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../coree/auth/auth_controller.dart';
 import '../../coree/colors/app_colors.dart';
 import '../../coree/theme/app_page_style.dart';
-import '../../services/api_service.Dart';
 
 /// Aligné sur `expo/app/settings/...` (écran données personnelles type `DataAccessPage` Expo).
 class DataAccessPage extends StatefulWidget {
@@ -27,20 +28,15 @@ class _DataAccessPageState extends State<DataAccessPage> {
   }
 
   Future<void> _loadUser() async {
-    final profile = await ApiService.getUserProfile();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
+    final u = context.read<AuthController>().user;
     setState(() {
-      final n = profile['name'] as String?;
-      _name = (n != null && n.trim().isNotEmpty) ? n : '—';
-
-      final e = profile['email'] as String?;
-      _email = (e != null && e.trim().isNotEmpty) ? e : '—';
-
-      final c = profile['company'] as String?;
+      _name = (u?.name ?? '').trim().isNotEmpty ? u!.name : '—';
+      _email = (u?.email ?? '').trim().isNotEmpty ? u!.email : '—';
+      final c = u?.company;
       _company = (c != null && c.trim().isNotEmpty) ? c : 'Non renseigné';
-
-      final r = profile['role'] as String?;
-      _role = (r != null && r.trim().isNotEmpty) ? r.toUpperCase() : '—';
+      _role = (u?.role ?? '').trim().isNotEmpty ? u!.role.toUpperCase() : '—';
     });
   }
 

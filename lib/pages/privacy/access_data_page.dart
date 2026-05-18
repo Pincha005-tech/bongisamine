@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../services/api_service.dart';
 import '../../coree/theme/app_themes.dart';
 import '../../coree/colors/app_colors.dart';
 
@@ -22,14 +21,15 @@ class _SecurityPageState extends State<SecurityPage> {
     super.dispose();
   }
 
-  void changePassword() async {
-    await ApiService.changePassword(oldCtrl.text, newCtrl.text);
-
+  Future<void> changePassword() async {
+    await Future<void>.delayed(const Duration(milliseconds: 600));
     if (!mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text("Mot de passe changé")));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Mot de passe mis à jour (mode démo)'),
+      ),
+    );
   }
 
   @override

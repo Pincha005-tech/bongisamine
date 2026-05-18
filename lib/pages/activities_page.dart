@@ -1,32 +1,10 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import '../services/api_service.Dart';
-
-class ActivityLog {
-  const ActivityLog({
-    required this.name,
-    required this.action,
-    required this.time,
-  });
-
-  final String name;
-  final String action;
-  final String time;
-
-  factory ActivityLog.fromMap(Map<String, dynamic> map) {
-    return ActivityLog(
-      name: map['name'] as String? ?? '',
-      action: map['action'] as String? ?? '',
-      time: map['time'] as String? ?? '',
-    );
-  }
-}
+import '../models/activity_log.dart';
+import 'activities_tracker_map_page.dart';
 
 /// Données de démo (aligné scan / travailleurs quand le backend est indisponible).
 const List<ActivityLog> _mockActivities = [
@@ -89,7 +67,6 @@ class ActivitiesPage extends StatefulWidget {
 
 class _ActivitiesPageState extends State<ActivitiesPage> {
   static const _pageSize = 5;
-  static const _requestTimeout = Duration(seconds: 5);
 
   final List<ActivityLog> _logs = [];
   bool _isLoading = true;
@@ -107,31 +84,6 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
     _loadActivities();
   }
 
-  Future<List<ActivityLog>?> _fetchFromApi(int page) async {
-    try {
-      final response = await http
-          .get(
-            Uri.parse('${ApiService.baseUrl}/activities?page=$page'),
-          )
-          .timeout(_requestTimeout);
-
-      if (response.statusCode != 200) return null;
-
-      final data = jsonDecode(response.body);
-      if (data is! Map<String, dynamic>) return null;
-
-      final raw = data['activities'];
-      if (raw is! List) return null;
-
-      return raw
-          .whereType<Map>()
-          .map((e) => ActivityLog.fromMap(Map<String, dynamic>.from(e)))
-          .toList();
-    } catch (_) {
-      return null;
-    }
-  }
-
   List<ActivityLog> _mockPage(int page) {
     final start = (page - 1) * _pageSize;
     if (start >= _mockActivities.length) return [];
@@ -145,7 +97,7 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
     if (!loadMore) {
       _page = 1;
       _hasMore = true;
-      _usingMock = false;
+      _usingMock = true;
       _error = null;
     }
 
@@ -158,20 +110,9 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
       }
     });
 
-    List<ActivityLog> batch = [];
-    var fromApi = false;
+    await Future<void>.delayed(const Duration(milliseconds: 400));
 
-    final apiBatch = await _fetchFromApi(_page);
-    if (apiBatch != null) {
-      batch = apiBatch;
-      fromApi = true;
-    } else {
-      batch = _mockPage(_page);
-      if (!loadMore && _page == 1) {
-        _usingMock = true;
-        _error = 'Serveur indisponible — affichage des activités récentes (démo).';
-      }
-    }
+    final batch = _mockPage(_page);
 
     if (!mounted) return;
     setState(() {
@@ -183,10 +124,8 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
           ..addAll(batch);
       }
 
-      _hasMore = fromApi
-          ? batch.length >= _pageSize
-          : batch.isNotEmpty &&
-              _page * _pageSize < _mockActivities.length;
+      _hasMore =
+          batch.isNotEmpty && _page * _pageSize < _mockActivities.length;
 
       if (batch.isNotEmpty) _page++;
       _isLoading = false;
@@ -212,13 +151,42 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
         children: [
           Padding(
             padding: EdgeInsets.fromLTRB(20, topPad + 24, 20, 8),
-            child: Text(
-              'Activités',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-                color: context.appTitleAccent,
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Activités',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: context.appTitleAccent,
+                    ),
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ActivitiesTrackerMapPage(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.map_rounded, size: 20),
+                  label: const Text('Carte GPS'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           if (_usingMock && _error != null)

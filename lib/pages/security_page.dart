@@ -8,7 +8,6 @@ import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import '../services/api_service.Dart';
 import 'changepass_page.dart';
 import 'privacy/privacy_page.dart';
 
@@ -33,7 +32,6 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     appThemeModeNotifier.addListener(_onThemeChanged);
-    unawaited(_loadProfile());
   }
 
   @override
@@ -44,19 +42,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _onThemeChanged() {
     if (mounted) setState(() {});
-  }
-
-  Future<void> _loadProfile() async {
-    final profile = await ApiService.getUserProfile();
-    if (!mounted) return;
-    setState(() {
-      _name = (profile['name'] as String?)?.trim().isNotEmpty == true
-          ? profile['name'] as String
-          : 'Utilisateur';
-      _email = (profile['email'] as String?) ?? '';
-      final r = profile['role'] as String?;
-      _role = (r != null && r.isNotEmpty) ? r.toUpperCase() : 'WORKER';
-    });
   }
 
   Future<void> _confirmLogout() async {
@@ -91,6 +76,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthController>();
+    final u = auth.user;
+    if (u != null) {
+      _name = u.name;
+      _email = u.email;
+      _role = u.role.toUpperCase();
+    }
+
     final topPad = MediaQuery.paddingOf(context).top;
 
     return DecoratedBox(
