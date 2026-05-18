@@ -1,10 +1,10 @@
 import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:crypto/crypto.dart';
-import 'qr_result_page.dart';
 
-import 'package:flutter/material.dart';
+import 'qr_result_page.dart';
 import '../coree/theme/theme_notifier.dart';
 
 class ThemeToggleButton extends StatelessWidget {
@@ -15,9 +15,7 @@ class ThemeToggleButton extends StatelessWidget {
     return ElevatedButton.icon(
       icon: const Icon(Icons.brightness_6),
       label: const Text("Changer thème"),
-      onPressed: () {
-        AppThemeController.toggleTheme();
-      },
+      onPressed: () => AppThemeController.toggleTheme(),
     );
   }
 }
@@ -74,7 +72,6 @@ class _ScanQRPageState extends State<ScanQRPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Scanner QR"),
-        backgroundColor: Colors.lightBlue,
       ),
      body: MobileScanner(
       onDetect: (capture) {

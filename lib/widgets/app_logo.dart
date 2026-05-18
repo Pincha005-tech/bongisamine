@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../coree/colors/app_colors.dart';
+
 class AppLogo extends StatelessWidget {
   const AppLogo({super.key, this.size = 80});
 
@@ -11,10 +13,10 @@ class AppLogo extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: const Color(0xFF4DA6FF).withOpacity(0.1),
+        color: AppColors.skyBlue.withValues(alpha: 0.12),
       ),
       child: Image.asset(
-        'assets/images/logo.jpeg',
+        'assets/images/icon.png',
         width: size,
         height: size,
         fit: BoxFit.contain,

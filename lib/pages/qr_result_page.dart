@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'package:flutter/material.dart';
 import '../coree/theme/theme_notifier.dart';
 
 class ThemeToggleButton extends StatelessWidget {
@@ -11,9 +10,7 @@ class ThemeToggleButton extends StatelessWidget {
     return ElevatedButton.icon(
       icon: const Icon(Icons.brightness_6),
       label: const Text("Changer thème"),
-      onPressed: () {
-        AppThemeController.toggleTheme();
-      },
+      onPressed: () => AppThemeController.toggleTheme(),
     );
   }
 }
@@ -76,7 +73,6 @@ class _QRResultPageState extends State<QRResultPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Détails du sac"),
-        backgroundColor: Colors.lightBlue,
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),

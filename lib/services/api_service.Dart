@@ -4,6 +4,43 @@ import 'package:http/http.dart' as http;
 class ApiService {
   static const baseUrl = "http://192.168.X.X:8000";
 
+  /// Inscription (`POST /signup`). Retourne succès + jeton optionnel si le backend en renvoie un.
+  static Future<({bool ok, String? token})> signup({
+    required String name,
+    required String email,
+    required String company,
+    required String password,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/signup'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'name': name,
+          'email': email,
+          'company': company,
+          'password': password,
+        }),
+      );
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        return (ok: false, token: null);
+      }
+
+      String? token;
+      try {
+        final dynamic data = jsonDecode(response.body);
+        if (data is Map) {
+          token = data['access_token'] as String? ?? data['token'] as String?;
+        }
+      } catch (_) {}
+
+      return (ok: true, token: token);
+    } catch (_) {
+      return (ok: false, token: null);
+    }
+  }
+
   /// 🔹 QR CODE (TON CODE EXISTANT)
   static Future<String?> generateQR(int mineralId) async {
     final response = await http.post(

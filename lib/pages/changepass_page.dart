@@ -1,26 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import '../coree/theme/theme_notifier.dart';
 
-class ThemeToggleButton extends StatelessWidget {
-  const ThemeToggleButton({super.key});
+import '../coree/colors/app_colors.dart';
+import '../coree/theme/app_page_style.dart';
 
-  @override
-  Widget build(BuildContext context) {
-    return ElevatedButton.icon(
-      icon: const Icon(Icons.brightness_6),
-      label: const Text("Changer thème"),
-      onPressed: () {
-        AppThemeController.toggleTheme();
-      },
-    );
-  }
-}
-
-class AppColors {
-  static const skyBlue = Color(0xFF4DA6FF);
-  static const bg = Colors.white;
-}
-
+/// Aligné sur `expo/app/settings/change-password.tsx`
 class ChangePasswordPage extends StatefulWidget {
   const ChangePasswordPage({super.key});
 
@@ -29,168 +14,245 @@ class ChangePasswordPage extends StatefulWidget {
 }
 
 class _ChangePasswordPageState extends State<ChangePasswordPage> {
-  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _current = TextEditingController();
+  final TextEditingController _newPass = TextEditingController();
+  final TextEditingController _confirm = TextEditingController();
 
-  final TextEditingController oldPassword = TextEditingController();
-  final TextEditingController newPassword = TextEditingController();
-  final TextEditingController confirmPassword = TextEditingController();
+  bool _showCurrent = false;
+  bool _showNew = false;
+  bool _showConfirm = false;
 
-  bool obscure1 = true;
-  bool obscure2 = true;
-  bool obscure3 = true;
+  String _error = '';
+  bool _success = false;
+
+  @override
+  void dispose() {
+    _current.dispose();
+    _newPass.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  void _handleSave() {
+    setState(() {
+      _error = '';
+      _success = false;
+    });
+
+    final current = _current.text.trim();
+    final newP = _newPass.text;
+    final confirm = _confirm.text;
+
+    if (current.isEmpty || newP.isEmpty || confirm.isEmpty) {
+      setState(() => _error = 'Tous les champs sont obligatoires');
+      return;
+    }
+    if (newP.length < 4) {
+      setState(
+        () => _error =
+            'Le nouveau mot de passe doit contenir au moins 4 caractères',
+      );
+      return;
+    }
+    if (newP != confirm) {
+      setState(() => _error = 'Les mots de passe ne correspondent pas');
+      return;
+    }
+
+    setState(() => _success = true);
+    unawaited(Future<void>.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) Navigator.of(context).maybePop();
+    }));
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+    final topPad = MediaQuery.paddingOf(context).top;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
 
-      /// 🔹 APPBAR
-      appBar: AppBar(
-        backgroundColor: Colors.lightBlue,
-        centerTitle: true,
-        title: const Text(
-          "Changer mot de passe",
-          style: TextStyle(color: Colors.white),
-        ),
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-
-      /// 🔹 BODY
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
+    final scroll = SingleChildScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: EdgeInsets.fromLTRB(24, topPad + 24, 24, 40 + bottomInset),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
             children: [
-
-              const SizedBox(height: 20),
-
-              /// 🔐 INFO BOX
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEAF4FF),
+              Material(
+                color: context.appCardColor,
+                elevation: 2,
+                shadowColor: AppColors.black.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  onTap: () => Navigator.maybePop(context),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.skyBlue),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info, color: AppColors.skyBlue),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        "Choisissez un mot de passe fort pour sécuriser votre compte.",
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 25),
-
-              /// 🔑 OLD PASSWORD
-              _field(
-                controller: oldPassword,
-                label: "Ancien mot de passe",
-                obscure: obscure1,
-                toggle: () => setState(() => obscure1 = !obscure1),
-              ),
-
-              const SizedBox(height: 15),
-
-              /// 🔑 NEW PASSWORD
-              _field(
-                controller: newPassword,
-                label: "Nouveau mot de passe",
-                obscure: obscure2,
-                toggle: () => setState(() => obscure2 = !obscure2),
-              ),
-
-              const SizedBox(height: 15),
-
-              /// 🔑 CONFIRM PASSWORD
-              _field(
-                controller: confirmPassword,
-                label: "Confirmer mot de passe",
-                obscure: obscure3,
-                toggle: () => setState(() => obscure3 = !obscure3),
-              ),
-
-              const SizedBox(height: 30),
-
-              /// 🔥 BUTTON
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.skyBlue,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Icon(
+                      Icons.chevron_left_rounded,
+                      size: 24,
+                      color: context.appTitleAccent,
                     ),
                   ),
-                  onPressed: () {
-                    if (_formKey.currentState!.validate()) {
-                      if (newPassword.text != confirmPassword.text) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text("Les mots de passe ne correspondent pas"),
-                          ),
-                        );
-                        return;
-                      }
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Mot de passe modifié avec succès"),
-                        ),
-                      );
-                    }
-                  },
-                  child: const Text(
-                    "Modifier le mot de passe",
-                    style: TextStyle(color: Colors.white),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Changer le mot de passe',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: context.appTitleAccent,
                   ),
                 ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 22),
+          if (_error.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                _error,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.error,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          if (_success)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Mot de passe modifié avec succès!',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.success,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          _PasswordField(
+            controller: _current,
+            hint: 'Mot de passe actuel',
+            obscure: !_showCurrent,
+            onToggleVisibility: () =>
+                setState(() => _showCurrent = !_showCurrent),
+          ),
+          const SizedBox(height: 14),
+          _PasswordField(
+            controller: _newPass,
+            hint: 'Nouveau mot de passe',
+            obscure: !_showNew,
+            onToggleVisibility: () => setState(() => _showNew = !_showNew),
+          ),
+          const SizedBox(height: 14),
+          _PasswordField(
+            controller: _confirm,
+            hint: 'Confirmer le mot de passe',
+            obscure: !_showConfirm,
+            onToggleVisibility: () =>
+                setState(() => _showConfirm = !_showConfirm),
+          ),
+          const SizedBox(height: 22),
+          SizedBox(
+            height: 54,
+            child: Material(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                onTap: _handleSave,
+                borderRadius: BorderRadius.circular(14),
+                child: const Center(
+                  child: Text(
+                    'Enregistrer',
+                    style: TextStyle(
+                      color: AppColors.cream,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      body: DecoratedBox(
+        decoration: context.appPageDecoration,
+        child: scroll,
       ),
     );
   }
+}
 
-  /// 🔹 INPUT FIELD PRO
-  Widget _field({
-    required TextEditingController controller,
-    required String label,
-    required bool obscure,
-    required VoidCallback toggle,
-  }) {
-    return TextFormField(
-      controller: controller,
-      obscureText: obscure,
-      validator: (value) {
-        if (value == null || value.isEmpty) {
-          return "Champ requis";
-        }
-        if (value.length < 6) {
-          return "Minimum 6 caractères";
-        }
-        return null;
-      },
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: const Icon(Icons.lock, color: AppColors.skyBlue),
-        suffixIcon: IconButton(
-          icon: Icon(
-            obscure ? Icons.visibility : Icons.visibility_off,
-          ),
-          onPressed: toggle,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+class _PasswordField extends StatelessWidget {
+  const _PasswordField({
+    required this.controller,
+    required this.hint,
+    required this.obscure,
+    required this.onToggleVisibility,
+  });
+
+  final TextEditingController controller;
+  final String hint;
+  final bool obscure;
+  final VoidCallback onToggleVisibility;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      elevation: 2,
+      shadowColor: AppColors.black.withValues(alpha: 0.04),
+      borderRadius: BorderRadius.circular(14),
+      color: context.appCardColor,
+      child: SizedBox(
+        height: 54,
+        child: Row(
+          children: [
+            const SizedBox(width: 16),
+            const Icon(Icons.lock_outline_rounded, size: 20, color: AppColors.gray),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                obscureText: obscure,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: context.appOnSurface,
+                ),
+                cursorColor: context.appTitleAccent,
+                decoration: InputDecoration(
+                  hintText: hint,
+                  hintStyle: const TextStyle(
+                    fontSize: 16,
+                    color: AppColors.gray,
+                  ),
+                  border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: onToggleVisibility,
+              icon: Icon(
+                obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                size: 20,
+                color: AppColors.gray,
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
         ),
       ),
     );
