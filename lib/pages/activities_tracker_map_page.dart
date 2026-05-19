@@ -7,8 +7,9 @@ import 'package:latlong2/latlong.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../models/gps_tracker.dart';
+import '../services/api_service.dart';
 
-/// Carte des traceurs GPS (backend `GET /trackers` + positions de démo).
+/// Carte des traceurs GPS (`ApiService.fetchGpsTrackers`).
 class ActivitiesTrackerMapPage extends StatefulWidget {
   const ActivitiesTrackerMapPage({super.key});
 
@@ -16,45 +17,6 @@ class ActivitiesTrackerMapPage extends StatefulWidget {
   State<ActivitiesTrackerMapPage> createState() =>
       _ActivitiesTrackerMapPageState();
 }
-
-const List<GpsTracker> _mockTrackers = [
-  GpsTracker(
-    id: 'T-001',
-    label: 'Camion extraction',
-    latitude: -11.6647,
-    longitude: 27.4794,
-    updatedAt: '08:42',
-    status: TrackerStatus.active,
-    batteryPercent: 87,
-  ),
-  GpsTracker(
-    id: 'T-002',
-    label: 'Équipe terrain A',
-    latitude: -11.6682,
-    longitude: 27.4851,
-    updatedAt: '08:40',
-    status: TrackerStatus.idle,
-    batteryPercent: 62,
-  ),
-  GpsTracker(
-    id: 'T-003',
-    label: 'Station de pesée',
-    latitude: -11.6610,
-    longitude: 27.4720,
-    updatedAt: '08:38',
-    status: TrackerStatus.active,
-    batteryPercent: 91,
-  ),
-  GpsTracker(
-    id: 'T-004',
-    label: 'Véhicule logistique',
-    latitude: -11.6715,
-    longitude: 27.4688,
-    updatedAt: 'Hier 18:05',
-    status: TrackerStatus.offline,
-    batteryPercent: 12,
-  ),
-];
 
 const LatLng _defaultCenter = LatLng(-11.6647, 27.4794);
 
@@ -66,7 +28,6 @@ class _ActivitiesTrackerMapPageState extends State<ActivitiesTrackerMapPage> {
 
   Timer? _pollTimer;
   bool _isLoading = true;
-  bool _usingMock = false;
   String? _bannerMessage;
   GpsTracker? _selected;
 
@@ -90,16 +51,17 @@ class _ActivitiesTrackerMapPageState extends State<ActivitiesTrackerMapPage> {
       setState(() => _isLoading = true);
     }
 
-    await Future<void>.delayed(const Duration(milliseconds: 350));
-    final list = List<GpsTracker>.from(_mockTrackers);
+    final list = await ApiService.fetchGpsTrackers();
 
     if (!mounted) return;
     setState(() {
-      _trackers
-        ..clear()
-        ..addAll(list);
-      _usingMock = true;
-      _bannerMessage = null;
+      _trackers.clear();
+      if (list != null && list.isNotEmpty) {
+        _trackers.addAll(list);
+        _bannerMessage = null;
+      } else {
+        _bannerMessage = 'Aucun traceur';
+      }
       _isLoading = false;
       if (_selected != null &&
           !_trackers.any((t) => t.id == _selected!.id)) {
@@ -107,7 +69,7 @@ class _ActivitiesTrackerMapPageState extends State<ActivitiesTrackerMapPage> {
       }
     });
 
-    _fitMapToTrackers();
+    if (_trackers.isNotEmpty) _fitMapToTrackers();
   }
 
   void _fitMapToTrackers() {
@@ -327,8 +289,8 @@ class _ActivitiesTrackerMapPageState extends State<ActivitiesTrackerMapPage> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      _usingMock
-                          ? '${_trackers.length} traceur(s) · démo'
+                      _trackers.isEmpty
+                          ? (_bannerMessage ?? 'Aucun traceur')
                           : '${_trackers.length} traceur(s) · live',
                       style: TextStyle(
                         fontSize: 12,

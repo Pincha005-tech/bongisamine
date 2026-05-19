@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../Screens/login_screen.dart';
+import '../coree/auth/auth_builder.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import 'transport_mock_data.dart';
+import 'transport_models.dart';
+import '../extraction/extraction_models.dart';
+import '../reception/reception_models.dart';
 import 'transport_role.dart';
 
 /// Profil superviseur transport + workflow métier.
@@ -64,10 +67,10 @@ class _TransportProfilePageState extends State<TransportProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.paddingOf(context).top;
-    final auth = context.watch<AuthController>();
-
-    return DecoratedBox(
+    return AuthBuilder(
+      builder: (context, auth) {
+        final top = MediaQuery.paddingOf(context).top;
+        return DecoratedBox(
       decoration: context.appPageDecoration,
       child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
@@ -183,23 +186,14 @@ class _TransportProfilePageState extends State<TransportProfilePage> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      _workflowStep('1', 'Extraction', 'EXTRACTED → STORED'),
+                      _workflowStep('1', 'Extraction', ExtractionWorkflow.transitionLabel),
                       _workflowStep(
                         '2',
                         'Transport (vous)',
-                        TransportMockData.transitionTransport,
+                        TransportWorkflow.transitionLabel,
                         highlight: true,
                       ),
-                      _workflowStep('3', 'Réception', 'IN_TRANSPORT → DEPOT_RECEIVED'),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Compte démo : transport@mine.com / 1234',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.appOnSurfaceMuted,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
+                      _workflowStep('3', 'Réception', ReceptionWorkflow.transitionLabel),
                     ],
                   ),
                 ),
@@ -221,6 +215,8 @@ class _TransportProfilePageState extends State<TransportProfilePage> {
           ),
         ],
       ),
+    );
+      },
     );
   }
 

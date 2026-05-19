@@ -14,6 +14,7 @@ class LotBatchPicker extends StatefulWidget {
     required this.batchCodes,
     required this.selectedBatch,
     required this.onBatchChanged,
+    this.onQrPayload,
     this.dropdownHint = 'Choisir un lot',
     this.listEmptyMessage,
     this.sectionTitle = '1. Lot (QR / batch_code)',
@@ -22,6 +23,7 @@ class LotBatchPicker extends StatefulWidget {
   final List<String> batchCodes;
   final String? selectedBatch;
   final ValueChanged<String?> onBatchChanged;
+  final ValueChanged<QrScanPayload?>? onQrPayload;
   final String dropdownHint;
   final String? listEmptyMessage;
   final String sectionTitle;
@@ -49,14 +51,16 @@ class _LotBatchPickerState extends State<LotBatchPicker> {
         ),
       );
       if (!mounted || raw == null) return;
-      final batch = parseBatchCodeFromQrRaw(raw);
-      if (batch == null || batch.isEmpty) {
+      final payload = parseQrScanPayload(raw);
+      if (payload == null) {
         _snack('QR illisible');
         return;
       }
+      final batch = payload.batchCode;
       widget.onBatchChanged(batch);
+      widget.onQrPayload?.call(payload);
       if (!widget.batchCodes.contains(batch)) {
-        _snack('Lot scanné : $batch (hors liste mock)');
+        _snack('Lot scanné : $batch (hors liste serveur)');
       } else {
         _snack('Lot scanné : $batch');
       }
@@ -102,20 +106,28 @@ class _LotBatchPickerState extends State<LotBatchPicker> {
         ),
         const SizedBox(height: 12),
         if (_mode == LotBatchInputMode.list) ...[
-          if (codes.isEmpty)
-            Text(
-              widget.listEmptyMessage ?? 'Aucun lot disponible pour ce statut.',
-              style: TextStyle(fontSize: 13, color: context.appOnSurfaceMuted),
-            )
-          else
+          if (widget.selectedBatch != null && widget.selectedBatch!.isNotEmpty)
+            _SelectedBatchChip(
+              batchCode: widget.selectedBatch!,
+              onClear: () {
+                widget.onBatchChanged(null);
+                widget.onQrPayload?.call(null);
+              },
+            ),
+          if (codes.isNotEmpty) ...[
+            if (widget.selectedBatch != null) const SizedBox(height: 10),
             DropdownButtonFormField<String>(
-              key: ValueKey(widget.selectedBatch),
+              key: ValueKey('dropdown_${codes.join("|")}'),
               isExpanded: true,
-              initialValue: widget.selectedBatch != null &&
+              value: widget.selectedBatch != null &&
                       codes.contains(widget.selectedBatch)
                   ? widget.selectedBatch
                   : null,
-              decoration: InputDecoration(hintText: widget.dropdownHint),
+              decoration: InputDecoration(
+                hintText: widget.selectedBatch != null
+                    ? 'Changer de lot'
+                    : widget.dropdownHint,
+              ),
               items: [
                 for (final code in codes)
                   DropdownMenuItem(
@@ -138,7 +150,15 @@ class _LotBatchPickerState extends State<LotBatchPicker> {
                     ),
                   ),
               ],
-              onChanged: widget.onBatchChanged,
+              onChanged: (v) {
+                widget.onBatchChanged(v);
+                widget.onQrPayload?.call(null);
+              },
+            ),
+          ] else if (widget.selectedBatch == null)
+            Text(
+              widget.listEmptyMessage ?? 'Aucun lot disponible pour ce statut.',
+              style: TextStyle(fontSize: 13, color: context.appOnSurfaceMuted),
             ),
         ] else ...[
           SizedBox(
@@ -176,7 +196,10 @@ class _LotBatchPickerState extends State<LotBatchPicker> {
                       ),
                     ),
                     IconButton(
-                      onPressed: () => widget.onBatchChanged(null),
+                      onPressed: () {
+                        widget.onBatchChanged(null);
+                        widget.onQrPayload?.call(null);
+                      },
                       icon: const Icon(Icons.close_rounded, size: 20),
                       color: AppColors.primary,
                       tooltip: 'Effacer',
@@ -188,6 +211,61 @@ class _LotBatchPickerState extends State<LotBatchPicker> {
           ],
         ],
       ],
+    );
+  }
+}
+
+/// Affichage non-éditable du lot (évite EditableText / crash metrics au dispose).
+class _SelectedBatchChip extends StatelessWidget {
+  const _SelectedBatchChip({
+    required this.batchCode,
+    required this.onClear,
+  });
+
+  final String batchCode;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.cream,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            const Icon(Icons.inventory_2_outlined, color: AppColors.primary, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Lot sélectionné',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: context.appOnSurfaceMuted,
+                    ),
+                  ),
+                  Text(
+                    batchCode,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: onClear,
+              icon: const Icon(Icons.close_rounded, size: 20),
+              color: AppColors.primary,
+              tooltip: 'Effacer',
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

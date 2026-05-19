@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../Screens/login_screen.dart';
+import '../coree/auth/auth_builder.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
@@ -76,17 +77,15 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthController>();
-    final u = auth.user;
-    if (u != null) {
-      _name = u.name;
-      _email = u.email;
-      _role = u.role.toUpperCase();
-    }
+    return AuthBuilder(
+      builder: (context, auth) {
+        final u = auth.user;
+        final name = u?.name ?? _name;
+        final email = u?.email ?? _email;
+        final role = (u?.role ?? _role).toUpperCase();
+        final topPad = MediaQuery.paddingOf(context).top;
 
-    final topPad = MediaQuery.paddingOf(context).top;
-
-    return DecoratedBox(
+        return DecoratedBox(
       decoration: context.appPageDecoration,
       child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
@@ -104,7 +103,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
           ),
-          SliverToBoxAdapter(child: _buildProfileCard()),
+          SliverToBoxAdapter(child: _buildProfileCard(name, email, role)),
           SliverToBoxAdapter(
             child: _buildSection(
               title: 'Compte',
@@ -176,9 +175,11 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+      },
+    );
   }
 
-  Widget _buildProfileCard() {
+  Widget _buildProfileCard(String name, String email, String role) {
     final cardColor = Theme.of(context).cardColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
@@ -213,7 +214,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _name,
+                      name,
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
@@ -222,7 +223,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _email.isEmpty ? '—' : _email,
+                      email.isEmpty ? '—' : email,
                       style: TextStyle(
                         fontSize: 13,
                         color: onSurface.withValues(alpha: 0.7),
@@ -240,7 +241,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        _role,
+                        role,
                         style: const TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w800,

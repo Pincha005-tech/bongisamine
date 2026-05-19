@@ -1,35 +1,132 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../coree/auth/auth_builder.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
-import 'reception_mock_data.dart';
+import '../coree/api/traceability_api_mapper.dart';
+import '../services/api_service.dart';
+import 'reception_models.dart';
 import 'reception_role.dart';
 import 'reception_widgets.dart';
 
-/// Accueil superviseur réception — mock aligné dashboard + file IN_TRANSPORT.
-class ReceptionHomePage extends StatelessWidget {
+class ReceptionHomePage extends StatefulWidget {
   const ReceptionHomePage({super.key, this.onNavigateTab});
 
   final void Function(int tabIndex)? onNavigateTab;
 
   @override
-  Widget build(BuildContext context) {
-    final top = MediaQuery.paddingOf(context).top;
-    final auth = context.watch<AuthController>();
-    final stats = ReceptionMockData.homeStats;
-    final inTransport = ReceptionMockData.qrLots
-        .where((q) => q.currentStatus == MineralLotStatus.inTransport)
-        .toList();
+  State<ReceptionHomePage> createState() => _ReceptionHomePageState();
+}
 
-    return DecoratedBox(
+class _ReceptionHomePageState extends State<ReceptionHomePage> {
+  int _inTransportCount = 0;
+  int _receptionsToday = 0;
+  int _fraudAlerts = 0;
+  int _criticalAlerts = 0;
+  List<ReceptionQrLot> _inTransportLots = [];
+  List<ReceptionLotMovement> _recentReceptions = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load() async {
+    final qrs = await ApiService.fetchQrcodes();
+    final alerts = await ApiService.fetchAlerts(limit: 50);
+    final history = await ApiService.fetchMineralHistory();
+    final today = DateTime.now();
+
+    final inTransport = <ReceptionQrLot>[];
+    for (final q in qrs) {
+      final status = (q['current_status'] as String? ?? '').toUpperCase();
+      if (status != LotStatus.inTransport) continue;
+      var batch = q['batch_code'] as String? ?? '';
+      if (batch.isEmpty && q['data'] != null) {
+        try {
+          final p = jsonDecode(q['data'] as String);
+          if (p is Map) batch = p['batch_code'] as String? ?? '';
+        } catch (_) {}
+      }
+      inTransport.add(
+        ReceptionQrLot(
+          id: q['id'] as int? ?? 0,
+          batchCode: batch,
+          currentStatus: status,
+          mineralId: q['mineral_id'] as int? ?? 0,
+          qrDataPreview: (q['data'] as String?)?.substring(0, 40) ?? batch,
+          valid: q['valid'] as bool? ?? true,
+        ),
+      );
+    }
+
+    var receptionsToday = 0;
+    final recent = <ReceptionLotMovement>[];
+    for (final h in history) {
+      final action = (h['action'] as String? ?? '').toUpperCase();
+      if (action.contains('RECEPTION') || action.contains('DEPOT')) {
+        final created = DateTime.tryParse(h['created_at'] as String? ?? '');
+        if (created != null &&
+            created.year == today.year &&
+            created.month == today.month &&
+            created.day == today.day) {
+          receptionsToday++;
+        }
+        if (recent.length < 5) {
+          recent.add(
+            ReceptionLotMovement(
+              id: h['id'] as int? ?? 0,
+              qrId: h['qr_id'] as int? ?? 0,
+              mineralId: h['mineral_id'] as int?,
+              workerId: h['worker_id'] as int?,
+              previousStatus: h['previous_status'] as String? ?? LotStatus.inTransport,
+              newStatus: h['new_status'] as String? ?? LotStatus.depotReceived,
+              locationName: h['location_name'] as String?,
+              action: h['action'] as String? ?? 'RECEPTION',
+              createdAtLabel: TraceabilityApiMapper.formatCreatedAt(h['created_at']),
+            ),
+          );
+        }
+      }
+    }
+
+    final fraudAlerts = alerts
+        .where((a) {
+          final t = (a['type'] as String? ?? '').toUpperCase();
+          return t.contains('FRAUD') || t.contains('FACE');
+        })
+        .length;
+
+    if (!mounted) return;
+    setState(() {
+      _inTransportCount = inTransport.length;
+      _inTransportLots = inTransport.take(6).toList();
+      _receptionsToday = receptionsToday;
+      _recentReceptions = recent;
+      _fraudAlerts = fraudAlerts;
+      _criticalAlerts = alerts
+          .where((a) => (a['severity'] as String? ?? '').toLowerCase() == 'critical')
+          .length;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AuthBuilder(
+      builder: (context, auth) {
+        final top = MediaQuery.paddingOf(context).top;
+        return DecoratedBox(
       decoration: context.appPageDecoration,
       child: RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: () async {
-          await Future<void>.delayed(const Duration(milliseconds: 600));
-        },
+        onRefresh: _load,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(
             parent: BouncingScrollPhysics(),
@@ -76,7 +173,7 @@ class ReceptionHomePage extends StatelessWidget {
                             ),
                             _chip(
                               Icons.swap_horiz_rounded,
-                              ReceptionMockData.transitionReception,
+                              ReceptionWorkflow.transitionLabel,
                             ),
                           ],
                         ),
@@ -86,180 +183,146 @@ class ReceptionHomePage extends StatelessWidget {
                 ),
               ),
             ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: LayoutBuilder(
-                  builder: (context, c) {
-                    final w = (c.maxWidth - 10) / 2;
-                    return Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        SizedBox(
-                          width: w,
-                          child: ReceptionKpiTile(
-                            label: 'En transport',
-                            value: '${stats.lotsInTransport}',
-                            icon: Icons.local_shipping_outlined,
-                            accent: AppColors.warning,
-                          ),
-                        ),
-                        SizedBox(
-                          width: w,
-                          child: ReceptionKpiTile(
-                            label: 'Réceptions (jour)',
-                            value: '${stats.receptionsToday}',
-                            icon: Icons.check_circle_outline,
-                            accent: AppColors.success,
-                          ),
-                        ),
-                        SizedBox(
-                          width: w,
-                          child: ReceptionKpiTile(
-                            label: 'Alertes critiques',
-                            value: '${stats.criticalAlerts}',
-                            icon: Icons.warning_amber_rounded,
-                            accent: AppColors.error,
-                          ),
-                        ),
-                        SizedBox(
-                          width: w,
-                          child: ReceptionKpiTile(
-                            label: 'QR invalides',
-                            value: '${stats.invalidQrToday}',
-                            icon: Icons.qr_code_2_rounded,
-                            accent: AppColors.skyBlue,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+            if (_loading)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
                 ),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: Material(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(16),
-                  child: InkWell(
-                    onTap: () => onNavigateTab?.call(1),
-                    borderRadius: BorderRadius.circular(16),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 18),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+              )
+            else ...[
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: LayoutBuilder(
+                    builder: (context, c) {
+                      final w = (c.maxWidth - 10) / 2;
+                      return Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
                         children: [
-                          Icon(Icons.qr_code_scanner_rounded, color: AppColors.cream),
-                          SizedBox(width: 10),
-                          Text(
-                            'Scanner une arrivée',
-                            style: TextStyle(
-                              color: AppColors.cream,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
+                          SizedBox(
+                            width: w,
+                            child: ReceptionKpiTile(
+                              label: 'En IN_TRANSPORT',
+                              value: '$_inTransportCount',
+                              icon: Icons.local_shipping_outlined,
+                              accent: const Color(0xFFF59E0B),
+                            ),
+                          ),
+                          SizedBox(
+                            width: w,
+                            child: ReceptionKpiTile(
+                              label: 'Réceptions (jour)',
+                              value: '$_receptionsToday',
+                              icon: Icons.inventory_outlined,
+                              accent: AppColors.success,
+                            ),
+                          ),
+                          SizedBox(
+                            width: w,
+                            child: ReceptionKpiTile(
+                              label: 'Alertes fraude',
+                              value: '$_fraudAlerts',
+                              icon: Icons.shield_outlined,
+                              accent: AppColors.warning,
+                            ),
+                          ),
+                          SizedBox(
+                            width: w,
+                            child: ReceptionKpiTile(
+                              label: 'Critiques',
+                              value: '$_criticalAlerts',
+                              icon: Icons.warning_amber_rounded,
+                              accent: AppColors.error,
                             ),
                           ),
                         ],
-                      ),
-                    ),
+                      );
+                    },
                   ),
                 ),
               ),
-            ),
-            const SliverToBoxAdapter(
-              child: ReceptionSectionTitle('Lots en attente (IN_TRANSPORT)'),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverList.separated(
-                itemCount: inTransport.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, i) {
-                  final lot = inTransport[i];
-                  return Material(
-                    color: context.appCardColor,
-                    elevation: 1,
-                    borderRadius: BorderRadius.circular(12),
-                    child: ListTile(
-                      onTap: () => onNavigateTab?.call(2),
-                      leading: const CircleAvatar(
-                        backgroundColor: AppColors.cream,
-                        child: Icon(Icons.inventory_2_outlined, color: AppColors.primary),
-                      ),
-                      title: Text(
-                        lot.batchCode,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text('Minerai #${lot.mineralId} · QR #${lot.id}'),
-                      trailing: const ReceptionStatusBadge(
-                        MineralLotStatus.inTransport,
-                        status: MineralLotStatus.inTransport,
-                      ),
-                    ),
-                  );
-                },
+              const SliverToBoxAdapter(
+                child: ReceptionSectionTitle('File IN_TRANSPORT'),
               ),
-            ),
-            const SliverToBoxAdapter(
-              child: ReceptionSectionTitle('Dernières réceptions'),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
-              sliver: SliverList.separated(
-                itemCount: ReceptionMockData.recentReceptions.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, i) {
-                  final m = ReceptionMockData.recentReceptions[i];
-                  return Material(
-                    color: context.appCardColor,
-                    borderRadius: BorderRadius.circular(12),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.login_rounded, color: AppColors.success),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Lot #${m.mineralId} · ${m.action}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    color: context.appOnSurface,
-                                  ),
-                                ),
-                                Text(
-                                  '${m.previousStatus} → ${m.newStatus}',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: context.appOnSurfaceMuted,
-                                  ),
-                                ),
-                              ],
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                sliver: _inTransportLots.isEmpty
+                    ? SliverToBoxAdapter(
+                        child: Text(
+                          'Aucun lot en transport',
+                          style: TextStyle(color: context.appOnSurfaceMuted),
+                        ),
+                      )
+                    : SliverList.separated(
+                        itemCount: _inTransportLots.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, i) {
+                          final lot = _inTransportLots[i];
+                          return Material(
+                            color: context.appCardColor,
+                            borderRadius: BorderRadius.circular(12),
+                            child: ListTile(
+                              onTap: () => widget.onNavigateTab?.call(1),
+                              title: Text(
+                                lot.batchCode,
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              subtitle: Text('Minerai #${lot.mineralId}'),
+                              trailing: ReceptionStatusBadge(
+                                lot.currentStatus,
+                                status: lot.currentStatus,
+                              ),
                             ),
-                          ),
-                          Text(
-                            m.createdAtLabel.split(' ').last,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: context.appOnSurfaceMuted,
-                            ),
-                          ),
-                        ],
+                          );
+                        },
                       ),
-                    ),
-                  );
-                },
               ),
-            ),
+              const SliverToBoxAdapter(
+                child: ReceptionSectionTitle('Réceptions récentes'),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                sliver: _recentReceptions.isEmpty
+                    ? SliverToBoxAdapter(
+                        child: Text(
+                          'Aucune réception récente',
+                          style: TextStyle(color: context.appOnSurfaceMuted),
+                        ),
+                      )
+                    : SliverList.separated(
+                        itemCount: _recentReceptions.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, i) {
+                          final m = _recentReceptions[i];
+                          return Material(
+                            color: context.appCardColor,
+                            borderRadius: BorderRadius.circular(12),
+                            child: ListTile(
+                              title: Text(
+                                '${m.previousStatus} → ${m.newStatus}',
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              subtitle: Text('${m.action} · ${m.locationName ?? "—"}'),
+                              trailing: Text(
+                                m.createdAtLabel.split(' ').last,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: context.appOnSurfaceMuted,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
           ],
         ),
       ),
+    );
+      },
     );
   }
 

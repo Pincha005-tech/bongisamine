@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../coree/auth/auth_controller.dart';
 import '../coree/routes/app_routes.dart';
+import '../coree/utils/keyboard_utils.dart';
 import '../widgets/app_logo.dart';
 import 'signup_screen.dart';
 
@@ -43,6 +44,8 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     setState(() => _busy = false);
     if (ok) {
+      KeyboardUtils.dismiss();
+      if (!mounted) return;
       Navigator.pushReplacementNamed(context, AppRoutes.home);
     } else {
       setState(() => _error = 'Connexion impossible');
@@ -112,8 +115,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 12),
                     ],
                     _input(
-                      hint: 'Email',
-                      icon: Icons.email,
+                      hint: 'Identifiant (username)',
+                      icon: Icons.person_outline,
                       controller: _emailController,
                     ),
                     const SizedBox(height: 15),

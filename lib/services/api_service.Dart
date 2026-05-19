@@ -6,7 +6,25 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/activity_log.dart';
 import '../models/gps_tracker.dart';
 import '../models/worker_item.dart';
+import '../coree/api/api_role_mapper.dart';
 import 'api_config.dart';
+
+/// Résultat scan traçabilité ou erreur métier.
+class ApiScanResult {
+  const ApiScanResult.success(this.body)
+      : ok = true,
+        errorMessage = null,
+        statusCode = 200;
+
+  const ApiScanResult.failure(this.errorMessage, {this.statusCode = 400})
+      : ok = false,
+        body = null;
+
+  final bool ok;
+  final Map<String, dynamic>? body;
+  final String? errorMessage;
+  final int statusCode;
+}
 
 /// Client HTTP aligné sur les routes `mine_back` (FastAPI).
 class ApiService {
@@ -14,7 +32,7 @@ class ApiService {
 
   static const baseUrl = ApiConfig.baseUrl;
   static const _tokenKey = 'bongisa_access_token';
-  static const _defaultTimeout = Duration(seconds: 8);
+  static const _defaultTimeout = ApiConfig.defaultTimeout;
 
   static String? _accessToken;
 
@@ -43,17 +61,21 @@ class ApiService {
     return map;
   }
 
-  static String normalizeRole(String? backendRole) {
-    final r = (backendRole ?? 'AGENT').toUpperCase();
-    switch (r) {
-      case 'ADMIN':
-        return 'admin';
-      case 'SUPERVISOR':
-      case 'STATE_AUTHORITY':
-        return 'supervisor';
-      default:
-        return 'worker';
+  static String normalizeRole(String? backendRole) =>
+      ApiRoleMapper.appRoleFromBackend(backendRole);
+
+  static String? extractErrorMessage(dynamic body, int status) {
+    if (body is Map && body['detail'] != null) {
+      final d = body['detail'];
+      if (d is String) return d;
+      if (d is List && d.isNotEmpty) {
+        final first = d.first;
+        if (first is Map && first['msg'] != null) {
+          return first['msg'].toString();
+        }
+      }
     }
+    return 'Erreur HTTP $status';
   }
 
   static String backendRoleFromContext(String frontRole) {
@@ -84,6 +106,14 @@ class ApiService {
           )
           .timeout(_defaultTimeout);
 
+      if (res.statusCode == 401 || res.statusCode == 403) {
+        final err = jsonDecode(res.body);
+        return (
+          ok: false,
+          data: null,
+          error: extractErrorMessage(err, res.statusCode),
+        );
+      }
       if (res.statusCode != 200) {
         return (ok: false, data: null, error: 'Identifiants incorrects');
       }
@@ -151,7 +181,7 @@ class ApiService {
           return {
             'name': username,
             'email': username,
-            'role': normalizeRole(data['role'] as String?),
+            'role': ApiRoleMapper.appRoleFromBackend(data['role'] as String?),
             'status': data['status'],
           };
         }
@@ -185,8 +215,8 @@ class ApiService {
 
   static Future<bool> deleteAccount() async => false;
 
-  /// `POST /qrcodes/mineral/{mineral_id}`
-  static Future<String?> generateQR(int mineralId) async {
+  /// `POST /qrcodes/mineral/{mineral_id}` — réponse complète QR.
+  static Future<Map<String, dynamic>?> generateQrForMineral(int mineralId) async {
     try {
       final res = await http
           .post(
@@ -197,9 +227,31 @@ class ApiService {
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        if (data is Map) {
-          return data['qr_path'] as String?;
-        }
+        if (data is Map<String, dynamic>) return data;
+        if (data is Map) return Map<String, dynamic>.from(data);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Alias rétrocompat — chemin image QR si présent.
+  static Future<String?> generateQR(int mineralId) async {
+    final data = await generateQrForMineral(mineralId);
+    return data?['qr_path'] as String?;
+  }
+
+  /// `GET /qrcodes/{qr_id}/image` — PNG avec en-tête Authorization.
+  static Future<List<int>?> fetchQrImageBytes(int qrId) async {
+    if (qrId <= 0) return null;
+    try {
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/qrcodes/$qrId/image'),
+            headers: headers(auth: true),
+          )
+          .timeout(_defaultTimeout);
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        return res.bodyBytes;
       }
     } catch (_) {}
     return null;
@@ -237,7 +289,10 @@ class ApiService {
   static Future<List<WorkerItem>?> fetchWorkers() async {
     try {
       final res = await http
-          .get(Uri.parse('$baseUrl/workers/'))
+          .get(
+            Uri.parse('$baseUrl/workers/'),
+            headers: headers(auth: true),
+          )
           .timeout(_defaultTimeout);
       if (res.statusCode != 200) return null;
 
@@ -317,7 +372,10 @@ class ApiService {
       final names = await _workerNamesById();
 
       final attRes = await http
-          .get(Uri.parse('$baseUrl/attendances/'))
+          .get(
+            Uri.parse('$baseUrl/attendances/'),
+            headers: headers(auth: true),
+          )
           .timeout(_defaultTimeout);
       if (attRes.statusCode != 200) return null;
 
@@ -360,6 +418,7 @@ class ApiService {
       final alertRes = await http
           .get(
             Uri.parse('$baseUrl/alerts/paginated?page=1&limit=50'),
+            headers: headers(auth: true),
           )
           .timeout(_defaultTimeout);
 
@@ -426,7 +485,10 @@ class ApiService {
   static Future<List<Map<String, dynamic>>> fetchMinerals() async {
     try {
       final res = await http
-          .get(Uri.parse('$baseUrl/minerals/'))
+          .get(
+            Uri.parse('$baseUrl/minerals/'),
+            headers: headers(auth: true),
+          )
           .timeout(_defaultTimeout);
       if (res.statusCode != 200) return [];
       final data = jsonDecode(res.body);
@@ -458,11 +520,28 @@ class ApiService {
     return [];
   }
 
-  /// `GET /attendances/today`
+  /// `GET /attendances/today` (+ repli `GET /attendances/` filtré sur la date locale).
   static Future<List<Map<String, dynamic>>> fetchAttendancesToday() async {
+    final today = await _getJsonList(
+      Uri.parse('$baseUrl/attendances/today'),
+      auth: true,
+    );
+    if (today.isNotEmpty) return today;
+
+    final all = await _getJsonList(
+      Uri.parse('$baseUrl/attendances/'),
+      auth: true,
+    );
+    return _attendancesForLocalDate(all, DateTime.now());
+  }
+
+  static Future<List<Map<String, dynamic>>> _getJsonList(
+    Uri uri, {
+    bool auth = false,
+  }) async {
     try {
       final res = await http
-          .get(Uri.parse('$baseUrl/attendances/today'))
+          .get(uri, headers: headers(auth: auth))
           .timeout(_defaultTimeout);
       if (res.statusCode != 200) return [];
       final data = jsonDecode(res.body);
@@ -474,6 +553,31 @@ class ApiService {
       }
     } catch (_) {}
     return [];
+  }
+
+  static List<Map<String, dynamic>> _attendancesForLocalDate(
+    List<Map<String, dynamic>> rows,
+    DateTime day,
+  ) {
+    bool sameDay(DateTime dt) =>
+        dt.year == day.year && dt.month == day.month && dt.day == day.day;
+
+    return rows.where((row) {
+      final raw = row['attendance_date'];
+      if (raw == null) return false;
+      if (raw is String) {
+        final parsed = DateTime.tryParse(raw);
+        if (parsed != null) return sameDay(parsed.toLocal());
+        final dateOnly = raw.split('T').first;
+        final parts = dateOnly.split('-');
+        if (parts.length >= 3) {
+          return int.tryParse(parts[0]) == day.year &&
+              int.tryParse(parts[1]) == day.month &&
+              int.tryParse(parts[2]) == day.day;
+        }
+      }
+      return false;
+    }).toList();
   }
 
   /// `GET /transactions/`
@@ -597,5 +701,402 @@ class ApiService {
       }
     } catch (_) {}
     return null;
+  }
+
+  /// `POST /traceability/{extraction|transport|reception}/scan` ou `/traceability/scan`
+  static Future<ApiScanResult> postTraceabilityScan({
+    required String segment,
+    required String imagePath,
+    required String qrData,
+    required String qrSignature,
+    String? locationName,
+    double? latitude,
+    double? longitude,
+    String? comment,
+    String? action,
+  }) async {
+    try {
+      final path = segment == 'scan'
+          ? '$baseUrl/traceability/scan'
+          : '$baseUrl/traceability/$segment/scan';
+      final request = http.MultipartRequest('POST', Uri.parse(path));
+      if (_accessToken != null) {
+        request.headers['Authorization'] = 'Bearer $_accessToken';
+      }
+      request.files.add(await http.MultipartFile.fromPath('file', imagePath));
+      request.fields['qr_data'] = qrData;
+      request.fields['qr_signature'] = qrSignature;
+      if (locationName != null && locationName.isNotEmpty) {
+        request.fields['location_name'] = locationName;
+      }
+      if (latitude != null) request.fields['latitude'] = '$latitude';
+      if (longitude != null) request.fields['longitude'] = '$longitude';
+      if (comment != null && comment.isNotEmpty) {
+        request.fields['comment'] = comment;
+      }
+      if (action != null && action.isNotEmpty) {
+        request.fields['action'] = action;
+      }
+      final streamed = await request.send().timeout(_defaultTimeout);
+      final res = await http.Response.fromStream(streamed);
+      dynamic body;
+      if (res.body.isNotEmpty) {
+        try {
+          body = jsonDecode(res.body);
+        } catch (_) {
+          body = res.body;
+        }
+      }
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return ApiScanResult.success(
+          body is Map<String, dynamic> ? body : {'raw': body},
+        );
+      }
+      return ApiScanResult.failure(
+        extractErrorMessage(body, res.statusCode),
+        statusCode: res.statusCode,
+      );
+    } catch (_) {
+      return const ApiScanResult.failure('Serveur inaccessible');
+    }
+  }
+
+  /// `GET /traceability/batch/{batch_code}`
+  static Future<List<Map<String, dynamic>>> fetchBatchMovements(
+    String batchCode,
+  ) async {
+    try {
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/traceability/batch/$batchCode'),
+            headers: headers(auth: true),
+          )
+          .timeout(_defaultTimeout);
+      if (res.statusCode != 200) return [];
+      final data = jsonDecode(res.body);
+      if (data is List) {
+        return data
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// `GET /traceability/workflow` (public)
+  static Future<Map<String, dynamic>?> fetchWorkflow() async {
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/traceability/workflow'))
+          .timeout(_defaultTimeout);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic>) return data;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// `POST /security/face-qr-fraud-check` (réception)
+  static Future<Map<String, dynamic>?> postFaceQrFraudCheck({
+    required String imagePath,
+    required String qrData,
+    required String qrSignature,
+  }) async {
+    return _postFaceQrSecurity(
+      'face-qr-fraud-check',
+      imagePath: imagePath,
+      qrData: qrData,
+      qrSignature: qrSignature,
+    );
+  }
+
+  /// `POST /security/face-qr-secure-read`
+  static Future<Map<String, dynamic>?> postFaceQrSecureRead({
+    required String imagePath,
+    required String qrData,
+    required String qrSignature,
+  }) async {
+    return _postFaceQrSecurity(
+      'face-qr-secure-read',
+      imagePath: imagePath,
+      qrData: qrData,
+      qrSignature: qrSignature,
+    );
+  }
+
+  static Future<Map<String, dynamic>?> _postFaceQrSecurity(
+    String path, {
+    required String imagePath,
+    required String qrData,
+    required String qrSignature,
+  }) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/security/$path'),
+      );
+      if (_accessToken != null) {
+        request.headers['Authorization'] = 'Bearer $_accessToken';
+      }
+      request.files.add(await http.MultipartFile.fromPath('file', imagePath));
+      request.fields['qr_data'] = qrData;
+      request.fields['qr_signature'] = qrSignature;
+      final res = await http.Response.fromStream(
+        await request.send().timeout(_defaultTimeout),
+      );
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final body = jsonDecode(res.body);
+        if (body is Map<String, dynamic>) return body;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// `POST /minerals/`
+  static Future<Map<String, dynamic>?> createMineral({
+    required String type,
+    required double weight,
+    String status = 'extracted',
+    double? latitude,
+    double? longitude,
+  }) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/minerals/'),
+            headers: headers(auth: true),
+            body: jsonEncode({
+              'type': type,
+              'weight': weight,
+              'status': status,
+              if (latitude != null) 'latitude': latitude,
+              if (longitude != null) 'longitude': longitude,
+            }),
+          )
+          .timeout(_defaultTimeout);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic>) return data;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// `GET /qrcodes/`
+  static Future<List<Map<String, dynamic>>> fetchQrcodes() async {
+    try {
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/qrcodes/'),
+            headers: headers(auth: true),
+          )
+          .timeout(_defaultTimeout);
+      if (res.statusCode != 200) return [];
+      final data = jsonDecode(res.body);
+      if (data is List) {
+        return data
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// `POST /workers/`
+  static Future<Map<String, dynamic>?> createWorker({
+    required String firstName,
+    required String lastName,
+    required String role,
+    required String badgeId,
+    String? departmentRole,
+  }) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/workers/'),
+            headers: headers(auth: true),
+            body: jsonEncode({
+              'first_name': firstName,
+              'last_name': lastName,
+              'role': role,
+              'badge_id': badgeId,
+              if (departmentRole != null) 'department_role': departmentRole,
+            }),
+          )
+          .timeout(_defaultTimeout);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic>) return data;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// `PUT /workers/{id}`
+  static Future<Map<String, dynamic>?> updateWorker(
+    int id, {
+    String? firstName,
+    String? lastName,
+    String? role,
+    String? badgeId,
+    String? departmentRole,
+  }) async {
+    try {
+      final body = <String, dynamic>{};
+      if (firstName != null) body['first_name'] = firstName;
+      if (lastName != null) body['last_name'] = lastName;
+      if (role != null) body['role'] = role;
+      if (badgeId != null) body['badge_id'] = badgeId;
+      if (departmentRole != null) body['department_role'] = departmentRole;
+      final res = await http
+          .put(
+            Uri.parse('$baseUrl/workers/$id'),
+            headers: headers(auth: true),
+            body: jsonEncode(body),
+          )
+          .timeout(_defaultTimeout);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic>) return data;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// `DELETE /workers/{id}`
+  static Future<bool> deleteWorker(int id) async {
+    try {
+      final res = await http
+          .delete(
+            Uri.parse('$baseUrl/workers/$id'),
+            headers: headers(auth: true),
+          )
+          .timeout(_defaultTimeout);
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// `POST /attendances/check-in` / `check-out`
+  static Future<Map<String, dynamic>?> attendanceCheck(
+    String action,
+    int workerId,
+  ) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/attendances/$action'),
+            headers: headers(auth: true),
+            body: jsonEncode({'worker_id': workerId}),
+          )
+          .timeout(_defaultTimeout);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic> && data['success'] == true) {
+          return data;
+        }
+        if (data is Map && data['success'] == true) {
+          return Map<String, dynamic>.from(data);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Message d'erreur renvoyé par check-in / check-out (`success: false`).
+  static Future<String?> attendanceCheckMessage(
+    String action,
+    int workerId,
+  ) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/attendances/$action'),
+            headers: headers(auth: true),
+            body: jsonEncode({'worker_id': workerId}),
+          )
+          .timeout(_defaultTimeout);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is Map && data['message'] != null) {
+          return data['message'].toString();
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// `POST /face/register/{worker_id}`
+  static Future<Map<String, dynamic>?> registerFace(
+    int workerId,
+    String imagePath,
+  ) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/face/register/$workerId'),
+      );
+      if (_accessToken != null) {
+        request.headers['Authorization'] = 'Bearer $_accessToken';
+      }
+      request.files.add(await http.MultipartFile.fromPath('file', imagePath));
+      final res = await http.Response.fromStream(
+        await request.send().timeout(_defaultTimeout),
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic>) return data;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// `POST /face/recognize`
+  static Future<Map<String, dynamic>?> recognizeFace(String imagePath) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/face/recognize'),
+      );
+      if (_accessToken != null) {
+        request.headers['Authorization'] = 'Bearer $_accessToken';
+      }
+      request.files.add(await http.MultipartFile.fromPath('file', imagePath));
+      final res = await http.Response.fromStream(
+        await request.send().timeout(_defaultTimeout),
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic>) return data;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchWorkersPaginated({
+    int page = 1,
+    int limit = 100,
+  }) async {
+    try {
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/workers/paginated?page=$page&limit=$limit'),
+            headers: headers(auth: true),
+          )
+          .timeout(_defaultTimeout);
+      if (res.statusCode != 200) return [];
+      final body = jsonDecode(res.body);
+      if (body is Map && body['data'] is List) {
+        return (body['data'] as List)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+    } catch (_) {}
+    return [];
   }
 }

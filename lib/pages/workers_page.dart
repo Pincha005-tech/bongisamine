@@ -1,68 +1,9 @@
 import 'package:flutter/material.dart';
-
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
 import '../models/worker_item.dart';
-
-const List<WorkerItem> _mockWorkers = [
-  WorkerItem(
-    id: '1',
-    name: 'Jean Mukendi',
-    status: WorkerStatus.active,
-    department: 'Extraction',
-    lastScan: '07:42',
-  ),
-  WorkerItem(
-    id: '2',
-    name: 'Marie Kabila',
-    status: WorkerStatus.active,
-    department: 'Sécurité',
-    lastScan: '07:38',
-  ),
-  WorkerItem(
-    id: '3',
-    name: 'Pierre Tshibangu',
-    status: WorkerStatus.onLeave,
-    department: 'Maintenance',
-    lastScan: '—',
-  ),
-  WorkerItem(
-    id: '4',
-    name: 'Anne Mbuyi',
-    status: WorkerStatus.active,
-    department: 'Extraction',
-    lastScan: '08:01',
-  ),
-  WorkerItem(
-    id: '5',
-    name: 'Charles Ilunga',
-    status: WorkerStatus.inactive,
-    department: 'Logistique',
-    lastScan: 'Hier',
-  ),
-  WorkerItem(
-    id: '6',
-    name: 'Grace Lumba',
-    status: WorkerStatus.active,
-    department: 'Sécurité',
-    lastScan: '07:55',
-  ),
-  WorkerItem(
-    id: '7',
-    name: 'David Kasongo',
-    status: WorkerStatus.active,
-    department: 'Extraction',
-    lastScan: '08:10',
-  ),
-  WorkerItem(
-    id: '8',
-    name: 'Sophie Ngalula',
-    status: WorkerStatus.onLeave,
-    department: 'Maintenance',
-    lastScan: '—',
-  ),
-];
+import '../services/api_service.dart';
 
 String _anonymize(String name) {
   final parts = name.trim().split(RegExp(r'\s+'));
@@ -108,13 +49,10 @@ class _WorkersPageState extends State<WorkersPage> {
   final TextEditingController _queryController = TextEditingController();
 
   _WorkersFilters _filters = const _WorkersFilters();
-  List<WorkerItem> _allWorkers = List<WorkerItem>.from(_mockWorkers);
-  List<WorkerItem> _filtered = List<WorkerItem>.from(_mockWorkers);
-  List<String> _departments = _mockWorkers
-      .map((w) => w.department)
-      .toSet()
-      .toList()
-    ..sort();
+  List<WorkerItem> _allWorkers = [];
+  List<WorkerItem> _filtered = [];
+  List<String> _departments = [];
+  bool _loading = true;
   bool get _isSupervisor => UserRoleController.role == 'supervisor';
 
   bool get _hasActiveFilters => !_filters.isEmpty;
@@ -123,6 +61,22 @@ class _WorkersPageState extends State<WorkersPage> {
   void initState() {
     super.initState();
     _queryController.addListener(_applyFilter);
+    _applyFilter();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadFromApi());
+  }
+
+  Future<void> _loadFromApi() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+    final workers = await ApiService.fetchWorkers();
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (workers != null) {
+        _allWorkers = workers;
+        _departments = workers.map((w) => w.department).toSet().toList()..sort();
+      }
+    });
     _applyFilter();
   }
 

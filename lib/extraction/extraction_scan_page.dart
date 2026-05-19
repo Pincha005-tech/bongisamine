@@ -1,60 +1,170 @@
-import 'package:flutter/material.dart';
+import 'dart:convert';
 
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../coree/auth/auth_controller.dart';
+import '../coree/utils/keyboard_utils.dart';
 import '../coree/colors/app_colors.dart';
+import '../coree/qr/batch_code_parser.dart';
 import '../coree/theme/app_page_style.dart';
+import '../coree/api/traceability_api_mapper.dart';
+import '../services/api_service.dart';
+import '../services/traceability_scan_service.dart';
 import '../widgets/face_capture_picker.dart';
 import '../widgets/lot_batch_picker.dart';
-import '../controle/controle_mock_data.dart';
-import 'extraction_mock_data.dart';
+import 'extraction_models.dart';
 import 'extraction_widgets.dart';
 
 class ExtractionScanPage extends StatefulWidget {
-  const ExtractionScanPage({super.key, this.onNavigateTab});
+  const ExtractionScanPage({
+    super.key,
+    this.onNavigateTab,
+  });
 
   final void Function(int tabIndex)? onNavigateTab;
 
   @override
-  State<ExtractionScanPage> createState() => _ExtractionScanPageState();
+  State<ExtractionScanPage> createState() => ExtractionScanPageState();
 }
 
-class _ExtractionScanPageState extends State<ExtractionScanPage> {
+class ExtractionScanPageState extends State<ExtractionScanPage> {
   final _locationCtrl = TextEditingController(text: 'Fosse Nord — Zone A');
+  final _locationFocus = FocusNode();
   String? _selectedBatch;
+  QrScanPayload? _qrPayload;
   bool _faceOk = false;
   String? _faceWorkerName;
+  String? _faceImagePath;
   bool _busy = false;
   ExtractionScanResult? _lastResult;
+  List<String> _batchCodes = [];
+  List<String> _workerNames = [];
+  bool _loadingBatches = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
 
   @override
   void dispose() {
     _locationCtrl.dispose();
+    _locationFocus.dispose();
     super.dispose();
   }
 
+  /// Préremplit le lot (depuis Minerais → Scanner).
+  void applyBatchPrefill(String batchCode) => _selectBatch(batchCode);
+
+  void _selectBatch(String batchCode) {
+    final pending = batchCode.trim();
+    if (pending.isEmpty) return;
+
+    String? match;
+    for (final c in _batchCodes) {
+      if (c.toUpperCase() == pending.toUpperCase()) {
+        match = c;
+        break;
+      }
+    }
+    final selected = match ?? pending;
+    final codes = List<String>.from(_batchCodes);
+    if (!codes.contains(selected)) codes.insert(0, selected);
+
+    setState(() {
+      _batchCodes = codes;
+      _selectedBatch = selected;
+      _qrPayload = null;
+    });
+  }
+
+  void _ensureSelectedInBatchCodes() {
+    final sel = _selectedBatch;
+    if (sel != null && sel.isNotEmpty && !_batchCodes.contains(sel)) {
+      _batchCodes = [sel, ..._batchCodes];
+    }
+  }
+
+  Future<void> _load() async {
+    if (_loadingBatches) return;
+    _loadingBatches = true;
+    final qrs = await ApiService.fetchQrcodes();
+    final workers = await ApiService.fetchWorkersPaginated(limit: 100);
+    _loadingBatches = false;
+    if (!mounted) return;
+    setState(() {
+      _batchCodes = qrs
+          .where((q) =>
+              (q['current_status'] as String? ?? '').toUpperCase() ==
+              ExtractionWorkflow.scanSourceStatus)
+          .map((q) {
+            var batch = q['batch_code'] as String? ?? '';
+            if (batch.isEmpty && q['data'] != null) {
+              try {
+                final p = jsonDecode(q['data'] as String);
+                if (p is Map) batch = p['batch_code'] as String? ?? '';
+              } catch (_) {}
+            }
+            return batch;
+          })
+          .where((b) => b.isNotEmpty)
+          .toList();
+      _workerNames = workers
+          .map((w) =>
+              '${w['first_name'] ?? ''} ${w['last_name'] ?? ''}'.trim())
+          .where((n) => n.isNotEmpty)
+          .toList();
+      _ensureSelectedInBatchCodes();
+    });
+  }
+
   Future<void> _submitStockage() async {
-    final batch = _selectedBatch;
-    if (batch == null) {
-      _snack('Sélectionnez un lot');
+    if (_selectedBatch == null || !_faceOk || _faceImagePath == null) {
+      _snack('Lot + visage (caméra) requis');
       return;
     }
+    if (_qrPayload == null) {
+      _snack('Scannez le QR du lot pour obtenir la signature');
+      return;
+    }
+    final auth = context.read<AuthController>();
+    if (!auth.hasApiToken) {
+      _snack('Session expirée — reconnectez-vous');
+      return;
+    }
+
     setState(() {
       _busy = true;
       _lastResult = null;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 900));
-    if (!mounted) return;
-    final result = ExtractionMockData.simulateExtractionScan(
-      batchCode: batch,
+
+    final api = await TraceabilityScanService.submit(
+      appRole: auth.role,
+      imagePath: _faceImagePath!,
+      qrData: _qrPayload!.qrData,
+      qrSignature: _qrPayload!.signature,
       locationName: _locationCtrl.text.trim(),
-      faceMatched: _faceOk,
+      action: ExtractionWorkflow.defaultAction,
     );
+
+    if (!mounted) return;
     setState(() {
       _busy = false;
-      _lastResult = result;
+      if (api.ok && api.body != null) {
+        _lastResult = ExtractionScanResult.success(
+          TraceabilityApiMapper.toExtraction(api.body!),
+        );
+        _snack('Lot stocké');
+        _load();
+      } else {
+        _lastResult = ExtractionScanResult.failure(
+          errorCode: 'API_ERROR',
+          errorMessage: api.errorMessage ?? 'Erreur scan',
+        );
+      }
     });
-    if (result.success) {
-      _snack('Lot stocké : ${ExtractionMockData.targetStatus}');
-    }
   }
 
   void _snack(String msg) {
@@ -64,9 +174,6 @@ class _ExtractionScanPageState extends State<ExtractionScanPage> {
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.paddingOf(context).top;
-    final extracted = ExtractionMockData.qrLots
-        .where((q) => q.currentStatus == LotStatus.extracted)
-        .toList();
 
     return DecoratedBox(
       decoration: context.appPageDecoration,
@@ -89,8 +196,8 @@ class _ExtractionScanPageState extends State<ExtractionScanPage> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Visage + QR → ${ExtractionMockData.targetStatus} '
-                    '(action ${ExtractionMockData.defaultAction})',
+                    'Visage + QR → ${ExtractionWorkflow.targetStatus} '
+                    '(action ${ExtractionWorkflow.defaultAction})',
                     style: TextStyle(
                       fontSize: 13,
                       color: context.appOnSurfaceMuted,
@@ -113,26 +220,32 @@ class _ExtractionScanPageState extends State<ExtractionScanPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       LotBatchPicker(
-                        batchCodes: extracted.map((q) => q.batchCode).toList(),
+                        batchCodes: _batchCodes,
                         selectedBatch: _selectedBatch,
                         dropdownHint: 'Choisir un lot en EXTRACTED',
-                        listEmptyMessage: 'Aucun lot en EXTRACTED.',
-                        onBatchChanged: (v) => setState(() => _selectedBatch = v),
+                        listEmptyMessage:
+                            'Aucun lot en EXTRACTED sur le serveur.',
+                        onBatchChanged: (v) => setState(() {
+                          _selectedBatch = v;
+                          if (v == null) _qrPayload = null;
+                        }),
+                        onQrPayload: (p) => setState(() => _qrPayload = p),
                       ),
                       const SizedBox(height: 14),
                       FaceCapturePicker(
                         matched: _faceOk,
                         workerName: _faceWorkerName,
-                        knownWorkerNames: ControleMockData.workers
-                            .map((w) => w.fullName)
-                            .toList(),
-                        onCapture: (ok, {workerName}) => setState(() {
+                        imagePath: _faceImagePath,
+                        knownWorkerNames: _workerNames,
+                        onCapture: (ok, {workerName, imagePath}) => setState(() {
                           _faceOk = ok;
                           _faceWorkerName = workerName;
+                          _faceImagePath = imagePath;
                         }),
                       ),
                       TextField(
                         controller: _locationCtrl,
+                        focusNode: _locationFocus,
                         decoration: const InputDecoration(
                           labelText: 'Lieu (location_name)',
                           prefixIcon: Icon(Icons.place_outlined),
@@ -165,19 +278,6 @@ class _ExtractionScanPageState extends State<ExtractionScanPage> {
           ),
           if (_lastResult != null)
             SliverToBoxAdapter(child: _buildResultCard(context, _lastResult!)),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'POST /traceability/extraction/scan — multipart visage + qr_data + qr_signature',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: context.appOnSurfaceMuted,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -192,22 +292,7 @@ class _ExtractionScanPageState extends State<ExtractionScanPage> {
           borderRadius: BorderRadius.circular(14),
           child: Padding(
             padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Échec — POST /traceability/extraction/scan',
-                  style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.error),
-                ),
-                const SizedBox(height: 6),
-                Text(r.errorMessage ?? 'Erreur'),
-                if (r.errorCode == 'INVALID_TRANSITION')
-                  TextButton(
-                    onPressed: () => widget.onNavigateTab?.call(3),
-                    child: const Text('Voir les alertes'),
-                  ),
-              ],
-            ),
+            child: Text(r.errorMessage ?? 'Erreur'),
           ),
         ),
       );
@@ -223,11 +308,6 @@ class _ExtractionScanPageState extends State<ExtractionScanPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Succès — lot stocké',
-                style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.success),
-              ),
-              const SizedBox(height: 8),
               Row(
                 children: [
                   ExtractionStatusBadge(m.previousStatus, status: m.previousStatus),
@@ -240,8 +320,6 @@ class _ExtractionScanPageState extends State<ExtractionScanPage> {
               ),
               const SizedBox(height: 8),
               Text('Lieu : ${m.locationName ?? "—"}'),
-              Text('Action : ${m.action}'),
-              Text('Horodatage : ${m.createdAtLabel}'),
             ],
           ),
         ),

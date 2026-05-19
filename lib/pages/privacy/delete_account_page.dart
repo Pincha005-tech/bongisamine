@@ -25,7 +25,7 @@ class _DeleteAccountPageState
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Demande enregistrée (mode démo — aucun envoi serveur)',
+            'Suppression de compte non disponible via l\'API',
           ),
         ),
       );

@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../Screens/login_screen.dart';
 import '../coree/auth/auth_controller.dart';
+import '../coree/routes/app_routes.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
@@ -51,18 +51,17 @@ class _ControleProfilePageState extends State<ControleProfilePage> {
     if (go != true || !mounted) return;
     await context.read<AuthController>().logout();
     if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (_) => false,
-    );
+    Navigator.of(context).pushNamedAndRemoveUntil(AppRoutes.login, (_) => false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.paddingOf(context).top;
-    final auth = context.watch<AuthController>();
-
-    return DecoratedBox(
+    final auth = context.read<AuthController>();
+    return ListenableBuilder(
+      listenable: auth,
+      builder: (context, _) {
+        final top = MediaQuery.paddingOf(context).top;
+        return DecoratedBox(
       decoration: context.appPageDecoration,
       child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
@@ -174,15 +173,6 @@ class _ControleProfilePageState extends State<ControleProfilePage> {
                       _resp(Icons.groups_outlined, 'Ouvriers', 'POST/PUT/DELETE /workers/'),
                       _resp(Icons.face_outlined, 'Visages', '/face/register · /face/recognize'),
                       _resp(Icons.schedule_outlined, 'Pointage', '/attendances/check-in · check-out'),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Compte démo : controle@mine.com / 1234',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.appOnSurfaceMuted,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -205,7 +195,10 @@ class _ControleProfilePageState extends State<ControleProfilePage> {
         ],
       ),
     );
+      },
+    );
   }
+
 
   Widget _resp(IconData icon, String title, String detail) {
     return Padding(

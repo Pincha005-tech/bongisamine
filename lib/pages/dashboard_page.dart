@@ -4,11 +4,13 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../coree/auth/auth_builder.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
+import '../services/api_service.dart';
 
-/// Tableau de bord (données de démonstration — sans backend).
+/// Tableau de bord — KPIs depuis `GET /dashboard/` et `GET /reports/daily`.
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key, this.onNavigateTab});
 
@@ -30,41 +32,129 @@ class _MonthDatum {
   final double value;
 }
 
-const List<_BarDatum> _weeklyBars = [
-  _BarDatum('Lun', 72),
-  _BarDatum('Mar', 85),
-  _BarDatum('Mer', 78),
-  _BarDatum('Jeu', 91),
-  _BarDatum('Ven', 88),
-  _BarDatum('Sam', 64),
-  _BarDatum('Dim', 58),
-];
-
-const List<_MonthDatum> _monthlyLine = [
-  _MonthDatum('Jan', 420),
-  _MonthDatum('Fév', 480),
-  _MonthDatum('Mar', 510),
-  _MonthDatum('Avr', 495),
-  _MonthDatum('Mai', 540),
-  _MonthDatum('Juin', 580),
-];
+const _weekdayLabels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
 class _DashboardPageState extends State<DashboardPage> {
   bool _refreshing = false;
+  bool _loading = true;
+  Map<String, dynamic>? _dashboard;
+  Map<String, dynamic>? _daily;
+  List<_BarDatum> _weeklyBars = [];
+  List<_MonthDatum> _monthlyLine = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  List<_BarDatum> _buildWeeklyBars(List<Map<String, dynamic>> history) {
+    final now = DateTime.now();
+    final counts = List<double>.filled(7, 0);
+    for (final h in history) {
+      final created = DateTime.tryParse(h['created_at'] as String? ?? '');
+      if (created == null) continue;
+      final diff = now.difference(created).inDays;
+      if (diff >= 0 && diff < 7) {
+        counts[6 - diff] += 1;
+      }
+    }
+    return List.generate(7, (i) => _BarDatum(_weekdayLabels[i], counts[i]));
+  }
+
+  List<_MonthDatum> _buildMonthlyLine(List<Map<String, dynamic>> history) {
+    final now = DateTime.now();
+    final monthLabels = <String>[];
+    final counts = <double>[];
+    for (var i = 5; i >= 0; i--) {
+      final d = DateTime(now.year, now.month - i, 1);
+      monthLabels.add(_monthShort(d.month));
+      counts.add(0);
+    }
+    for (final h in history) {
+      final created = DateTime.tryParse(h['created_at'] as String? ?? '');
+      if (created == null) continue;
+      for (var i = 0; i < 6; i++) {
+        final anchor = DateTime(now.year, now.month - (5 - i), 1);
+        if (created.year == anchor.year && created.month == anchor.month) {
+          counts[i] += 1;
+          break;
+        }
+      }
+    }
+    return List.generate(6, (i) => _MonthDatum(monthLabels[i], counts[i]));
+  }
+
+  String _monthShort(int month) {
+    const names = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+    return names[(month - 1).clamp(0, 11)];
+  }
+
+  Future<void> _loadData() async {
+    final dashboard = await ApiService.fetchDashboard();
+    final daily = await ApiService.fetchDailyReport();
+    final history = await ApiService.fetchMineralHistory();
+    if (!mounted) return;
+    setState(() {
+      _dashboard = dashboard;
+      _daily = daily;
+      _weeklyBars = _buildWeeklyBars(history);
+      _monthlyLine = _buildMonthlyLine(history);
+      _loading = false;
+      _refreshing = false;
+    });
+  }
 
   Future<void> _onRefresh() async {
     setState(() => _refreshing = true);
-    await Future<void>.delayed(const Duration(milliseconds: 900));
-    if (mounted) setState(() => _refreshing = false);
+    await _loadData();
+  }
+
+  String _statWorkers() {
+    final w = _dashboard?['workers'] ?? _daily?['workers'];
+    if (w is int) return '$w';
+    if (w is Map && w['total'] != null) return '${w['total']}';
+    return '—';
+  }
+
+  String _statScans() {
+    final q = _dashboard?['qrcodes'];
+    if (q is int) return '$q';
+    final m = _dashboard?['lot_movements'];
+    if (m is int) return '$m';
+    return '—';
+  }
+
+  String _statActive() {
+    final att = _daily?['attendance'];
+    if (att is Map) {
+      final present = att['total_present'] as int? ?? 0;
+      final total = (_dashboard?['workers'] as int?) ?? present;
+      if (total > 0) {
+        return '${(present / total * 100).toStringAsFixed(1)} %';
+      }
+    }
+    return '—';
+  }
+
+  String _statProductivity() {
+    final trace = _daily?['traceability'];
+    if (trace is Map && trace['total_movements'] != null) {
+      return '${trace['total_movements']}';
+    }
+    final m = _dashboard?['lot_movements'];
+    if (m is int) return '$m';
+    return '—';
   }
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.paddingOf(context).top;
-    final auth = context.watch<AuthController>();
-    final displayName = auth.name;
+    return AuthBuilder(
+      builder: (context, auth) {
+        final topPad = MediaQuery.paddingOf(context).top;
+        final displayName = auth.name;
 
-    return DecoratedBox(
+        return DecoratedBox(
       decoration: context.appPageDecoration,
       child: RefreshIndicator(
         color: AppColors.primary,
@@ -130,63 +220,71 @@ class _DashboardPageState extends State<DashboardPage> {
                   backgroundColor: AppColors.creamDark,
                 ),
               ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final gap = 12.0;
-                    final w = (constraints.maxWidth - gap) / 2;
-                    return Wrap(
-                      spacing: gap,
-                      runSpacing: gap,
-                      children: [
-                        SizedBox(
-                          width: w,
-                          child: const _StatCard(
-                            icon: Icons.groups_rounded,
-                            label: 'Travailleurs',
-                            value: '1 247',
-                            delta: '+3.2 %',
-                            positive: true,
+            if (_loading)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              )
+            else
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final gap = 12.0;
+                      final w = (constraints.maxWidth - gap) / 2;
+                      return Wrap(
+                        spacing: gap,
+                        runSpacing: gap,
+                        children: [
+                          SizedBox(
+                            width: w,
+                            child: _StatCard(
+                              icon: Icons.groups_rounded,
+                              label: 'Travailleurs',
+                              value: _statWorkers(),
+                              delta: 'API',
+                              positive: true,
+                            ),
                           ),
-                        ),
-                        SizedBox(
-                          width: w,
-                          child: const _StatCard(
-                            icon: Icons.document_scanner_outlined,
-                            label: 'Scans',
-                            value: '856',
-                            delta: '+12 %',
-                            positive: true,
+                          SizedBox(
+                            width: w,
+                            child: _StatCard(
+                              icon: Icons.document_scanner_outlined,
+                              label: 'QR / mouvements',
+                              value: _statScans(),
+                              delta: 'API',
+                              positive: true,
+                            ),
                           ),
-                        ),
-                        SizedBox(
-                          width: w,
-                          child: const _StatCard(
-                            icon: Icons.layers_rounded,
-                            label: 'Actifs',
-                            value: '98.2 %',
-                            delta: '−0.4 %',
-                            positive: false,
+                          SizedBox(
+                            width: w,
+                            child: _StatCard(
+                              icon: Icons.layers_rounded,
+                              label: 'Présence',
+                              value: _statActive(),
+                              delta: 'jour',
+                              positive: true,
+                            ),
                           ),
-                        ),
-                        SizedBox(
-                          width: w,
-                          child: const _StatCard(
-                            icon: Icons.trending_up_rounded,
-                            label: 'Productivité',
-                            value: '87',
-                            delta: '+5.1 %',
-                            positive: true,
+                          SizedBox(
+                            width: w,
+                            child: _StatCard(
+                              icon: Icons.trending_up_rounded,
+                              label: 'Mouvements',
+                              value: _statProductivity(),
+                              delta: 'traçabilité',
+                              positive: true,
+                            ),
                           ),
-                        ),
-                      ],
-                    );
-                  },
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ),
-            ),
             const SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
@@ -200,10 +298,14 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ),
             ),
-            const SliverToBoxAdapter(
+            SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: _WeeklyBarChartCard(data: _weeklyBars),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _WeeklyBarChartCard(
+                  data: _weeklyBars.isEmpty
+                      ? List.generate(7, (i) => _BarDatum(_weekdayLabels[i], 0))
+                      : _weeklyBars,
+                ),
               ),
             ),
             const SliverToBoxAdapter(
@@ -219,51 +321,22 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ),
             ),
-            const SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: _MonthlyLineChartCard(data: _monthlyLine),
-              ),
-            ),
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
-                child: Material(
-                  color: context.appCardColor,
-                  elevation: 2,
-                  shadowColor: AppColors.black.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(16),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.info_outline_rounded,
-                          color: AppColors.skyBlue,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'Mode démonstration — les chiffres sont fictifs. '
-                            'Connectez le backend pour des données réelles.',
-                            style: TextStyle(
-                              fontSize: 13,
-                              height: 1.35,
-                              color: context.appOnSurfaceMuted,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _MonthlyLineChartCard(
+                  data: _monthlyLine.isEmpty
+                      ? List.generate(6, (i) => _MonthDatum(_monthShort(i + 1), 0))
+                      : _monthlyLine,
                 ),
               ),
             ),
+            const SliverToBoxAdapter(child: SizedBox(height: 32)),
           ],
         ),
       ),
+    );
+      },
     );
   }
 }

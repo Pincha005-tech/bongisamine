@@ -1,10 +1,13 @@
-import 'package:flutter/material.dart';
+import 'dart:convert';
 
+import 'package:flutter/material.dart';
+import '../coree/api/traceability_api_mapper.dart';
 import '../coree/theme/app_page_style.dart';
-import 'transport_mock_data.dart';
+import '../services/api_service.dart';
+import 'transport_models.dart';
 import 'transport_widgets.dart';
 
-/// Lots & traçabilité — mock `GET /traceability/batch/{code}` + QR.
+/// Lots & traçabilité — `GET /traceability/batch/{code}` + QR.
 class TransportLotsPage extends StatefulWidget {
   const TransportLotsPage({super.key});
 
@@ -16,6 +19,14 @@ class _TransportLotsPageState extends State<TransportLotsPage> {
   final _searchCtrl = TextEditingController();
   String? _selectedBatch;
   List<TransportLotMovement> _history = [];
+  List<TransportQrLot> _qrLots = [];
+  bool _searching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadQrcodes());
+  }
 
   @override
   void dispose() {
@@ -23,21 +34,62 @@ class _TransportLotsPageState extends State<TransportLotsPage> {
     super.dispose();
   }
 
-  void _search() {
+  Future<void> _loadQrcodes() async {
+    final raw = await ApiService.fetchQrcodes();
+    if (!mounted) return;
+    setState(() {
+      _qrLots = raw.map((q) {
+        var batch = q['batch_code'] as String? ?? '';
+        if (batch.isEmpty && q['data'] != null) {
+          try {
+            final parsed = jsonDecode(q['data'] as String);
+            if (parsed is Map) batch = parsed['batch_code'] as String? ?? '';
+          } catch (_) {}
+        }
+        return TransportQrLot(
+          id: q['id'] as int? ?? 0,
+          batchCode: batch,
+          currentStatus: q['current_status'] as String? ?? LotStatus.stored,
+          mineralId: q['mineral_id'] as int? ?? 0,
+          valid: q['valid'] as bool? ?? true,
+        );
+      }).toList();
+    });
+  }
+
+  TransportQrLot? _qrForBatch(String batch) {
+    for (final q in _qrLots) {
+      if (q.batchCode.toUpperCase() == batch.toUpperCase()) return q;
+    }
+    return null;
+  }
+
+  Future<void> _search() async {
     final code = _searchCtrl.text.trim().toUpperCase();
     if (code.isEmpty) return;
     setState(() {
       _selectedBatch = code;
-      _history = TransportMockData.historyForBatch(code);
+      _searching = true;
     });
+
+    final rows = await ApiService.fetchBatchMovements(code);
+    if (mounted) {
+      setState(() {
+        _history = rows.map(TraceabilityApiMapper.toTransport).toList();
+        _searching = false;
+      });
+    }
+    if (_history.isEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aucun mouvement pour ce lot')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.paddingOf(context).top;
-    final qr = _selectedBatch != null
-        ? TransportMockData.findQrByBatch(_selectedBatch!)
-        : null;
+    final qr = _selectedBatch != null ? _qrForBatch(_selectedBatch!) : null;
 
     return DecoratedBox(
       decoration: context.appPageDecoration,
@@ -66,7 +118,7 @@ class _TransportLotsPageState extends State<TransportLotsPage> {
                     child: TextField(
                       controller: _searchCtrl,
                       decoration: const InputDecoration(
-                        hintText: 'batch_code (ex. DRC-MINE-2-B91E04)',
+                        hintText: 'batch_code',
                         prefixIcon: Icon(Icons.search_rounded),
                       ),
                       onSubmitted: (_) => _search(),
@@ -74,8 +126,14 @@ class _TransportLotsPageState extends State<TransportLotsPage> {
                   ),
                   const SizedBox(width: 8),
                   FilledButton(
-                    onPressed: _search,
-                    child: const Text('Historique'),
+                    onPressed: _searching ? null : _search,
+                    child: _searching
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Historique'),
                   ),
                 ],
               ),
@@ -87,66 +145,21 @@ class _TransportLotsPageState extends State<TransportLotsPage> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: Material(
                   color: context.appCardColor,
-                  elevation: 2,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          qr.batchCode,
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: context.appOnSurface,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            TransportStatusBadge(
-                              qr.currentStatus,
-                              status: qr.currentStatus,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'QR #${qr.id} · Minerai #${qr.mineralId}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: context.appOnSurfaceMuted,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  qr.valid
-                                      ? 'POST /qrcodes/verify — valide (mock)'
-                                      : 'QR invalide (mock)',
-                                ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.verified_outlined),
-                          label: const Text('Vérifier QR'),
-                        ),
-                      ],
+                  borderRadius: BorderRadius.circular(14),
+                  child: ListTile(
+                    title: Text(
+                      qr.batchCode,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
+                    subtitle: Text('QR #${qr.id} · Minerai #${qr.mineralId}'),
+                    trailing: TransportStatusBadge(qr.currentStatus, status: qr.currentStatus),
                   ),
                 ),
               ),
             ),
-          if (_history.isNotEmpty) ...[
-            const SliverToBoxAdapter(
-              child: TransportSectionTitle('Mouvements (GET /traceability/batch/…)'),
-            ),
+          if (_history.isNotEmpty)
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
               sliver: SliverList.separated(
                 itemCount: _history.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -168,19 +181,10 @@ class _TransportLotsPageState extends State<TransportLotsPage> {
                             ],
                           ),
                           const SizedBox(height: 6),
-                          Text(
-                            m.locationName ?? '—',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: context.appOnSurface,
-                            ),
-                          ),
+                          Text(m.locationName ?? '—'),
                           Text(
                             '${m.action} · ${m.createdAtLabel}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: context.appOnSurfaceMuted,
-                            ),
+                            style: TextStyle(fontSize: 12, color: context.appOnSurfaceMuted),
                           ),
                         ],
                       ),
@@ -189,12 +193,11 @@ class _TransportLotsPageState extends State<TransportLotsPage> {
                 },
               ),
             ),
-          ],
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
               child: Text(
-                'Essayez : DRC-MINE-2-B91E04 ou DRC-MINE-8-A3D91C',
+                'Historique via GET /traceability/batch/{code}',
                 style: TextStyle(
                   fontSize: 12,
                   color: context.appOnSurfaceMuted,

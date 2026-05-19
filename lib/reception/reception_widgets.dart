@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../coree/theme/app_page_style.dart';
-import 'reception_mock_data.dart';
+import '../coree/traceability/status_style.dart';
 
 class ReceptionSectionTitle extends StatelessWidget {
   const ReceptionSectionTitle(this.text, {super.key});
@@ -32,7 +32,7 @@ class ReceptionStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = receptionStatusColor(status ?? label);
+    final color = lotStatusColor(status ?? label);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(

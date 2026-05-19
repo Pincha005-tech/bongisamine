@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../coree/theme/app_page_style.dart';
-import 'extraction_mock_data.dart';
+import '../coree/traceability/status_style.dart';
 
 class ExtractionSectionTitle extends StatelessWidget {
   const ExtractionSectionTitle(this.text, {super.key});
@@ -32,7 +32,7 @@ class ExtractionStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = extractionStatusColor(status ?? label);
+    final color = lotStatusColor(status ?? label);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(

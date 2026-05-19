@@ -125,7 +125,11 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
           : pool[math.Random().nextInt(pool.length)];
       Navigator.pop(
         context,
-        FaceCaptureResult(matched: true, workerName: name),
+        FaceCaptureResult(
+          matched: true,
+          workerName: name,
+          imagePath: photo.path,
+        ),
       );
     } catch (_) {
       if (mounted) {

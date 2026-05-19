@@ -25,7 +25,7 @@ class _SecurityPageState extends State<SecurityPage> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Mot de passe mis à jour (mode démo)'),
+        content: Text('Changement de mot de passe non disponible via l\'API'),
       ),
     );
   }

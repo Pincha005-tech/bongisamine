@@ -12,13 +12,16 @@ class FaceCapturePicker extends StatefulWidget {
     required this.matched,
     required this.onCapture,
     this.workerName,
+    this.imagePath,
     this.sectionTitle = '2. Reconnaissance faciale',
     this.knownWorkerNames,
   });
 
   final bool matched;
   final String? workerName;
-  final void Function(bool matched, {String? workerName}) onCapture;
+  final String? imagePath;
+  final void Function(bool matched, {String? workerName, String? imagePath})
+      onCapture;
   final String sectionTitle;
   final List<String>? knownWorkerNames;
 
@@ -43,7 +46,11 @@ class _FaceCapturePickerState extends State<FaceCapturePicker> {
         ),
       );
       if (!mounted || result == null) return;
-      widget.onCapture(result.matched, workerName: result.workerName);
+      widget.onCapture(
+        result.matched,
+        workerName: result.workerName,
+        imagePath: result.imagePath,
+      );
     } finally {
       if (mounted) setState(() => _opening = false);
     }

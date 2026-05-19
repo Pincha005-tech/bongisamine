@@ -20,16 +20,9 @@ class _ControleShellScreenState extends State<ControleShellScreen> {
 
   void _goTab(int i) {
     if (i < 0 || i > 4) return;
+    if (_index == i) return;
     setState(() => _index = i);
   }
-
-  late final List<Widget> _pages = [
-    ControleHomePage(onNavigateTab: _goTab),
-    ControleWorkersPage(onNavigateTab: _goTab),
-    ControleAttendancePage(onNavigateTab: _goTab),
-    const ControleFacePage(),
-    const ControleProfilePage(),
-  ];
 
   static const double _tabBarHeight = 72;
   static const double _iconSize = 22;
@@ -51,7 +44,28 @@ class _ControleShellScreenState extends State<ControleShellScreen> {
       backgroundColor: theme.scaffoldBackgroundColor,
       body: IndexedStack(
         index: _index,
-        children: _pages,
+        children: [
+          ControleHomePage(
+            key: const PageStorageKey<String>('controle_home'),
+            onNavigateTab: _goTab,
+            active: _index == 0,
+          ),
+          ControleWorkersPage(
+            key: const PageStorageKey<String>('controle_workers'),
+            onNavigateTab: _goTab,
+          ),
+          ControleAttendancePage(
+            key: const PageStorageKey<String>('controle_attendance'),
+            onNavigateTab: _goTab,
+            active: _index == 2,
+          ),
+          const ControleFacePage(
+            key: PageStorageKey<String>('controle_face'),
+          ),
+          const ControleProfilePage(
+            key: PageStorageKey<String>('controle_profile'),
+          ),
+        ],
       ),
       bottomNavigationBar: Material(
         elevation: 4,
@@ -84,7 +98,7 @@ class _ControleShellScreenState extends State<ControleShellScreen> {
                     selectedLabelStyle: _tabLabelStyle,
                     unselectedLabelStyle: _tabLabelStyle,
                     iconSize: _iconSize,
-                    onTap: (i) => setState(() => _index = i),
+                    onTap: _goTab,
                     items: [
                       BottomNavigationBarItem(
                         icon: Icon(Icons.home_outlined, size: _iconSize),

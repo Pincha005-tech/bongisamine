@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../Screens/login_screen.dart';
+import '../coree/auth/auth_builder.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import 'reception_mock_data.dart';
+import 'reception_models.dart';
 import 'reception_role.dart';
+import '../extraction/extraction_models.dart';
+import '../transport/transport_models.dart';
 
 /// Profil superviseur réception + workflow métier.
 class ReceptionProfilePage extends StatefulWidget {
@@ -64,10 +67,10 @@ class _ReceptionProfilePageState extends State<ReceptionProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.paddingOf(context).top;
-    final auth = context.watch<AuthController>();
-
-    return DecoratedBox(
+    return AuthBuilder(
+      builder: (context, auth) {
+        final top = MediaQuery.paddingOf(context).top;
+        return DecoratedBox(
       decoration: context.appPageDecoration,
       child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
@@ -183,22 +186,13 @@ class _ReceptionProfilePageState extends State<ReceptionProfilePage> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      _workflowStep('1', 'Extraction', 'EXTRACTED → STORED'),
-                      _workflowStep('2', 'Transport', 'STORED → IN_TRANSPORT'),
+                      _workflowStep('1', 'Extraction', ExtractionWorkflow.transitionLabel),
+                      _workflowStep('2', 'Transport', TransportWorkflow.transitionLabel),
                       _workflowStep(
                         '3',
                         'Réception (vous)',
-                        ReceptionMockData.transitionReception,
+                        ReceptionWorkflow.transitionLabel,
                         highlight: true,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Compte démo : reception@mine.com / 1234',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.appOnSurfaceMuted,
-                          fontStyle: FontStyle.italic,
-                        ),
                       ),
                     ],
                   ),
@@ -221,6 +215,8 @@ class _ReceptionProfilePageState extends State<ReceptionProfilePage> {
           ),
         ],
       ),
+    );
+      },
     );
   }
 

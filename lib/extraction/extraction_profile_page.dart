@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../Screens/login_screen.dart';
+import '../coree/auth/auth_builder.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import 'extraction_mock_data.dart';
+import 'extraction_models.dart';
 import 'extraction_role.dart';
+import '../reception/reception_models.dart';
+import '../transport/transport_models.dart';
 
 class ExtractionProfilePage extends StatefulWidget {
   const ExtractionProfilePage({super.key});
@@ -60,10 +63,10 @@ class _ExtractionProfilePageState extends State<ExtractionProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.paddingOf(context).top;
-    final auth = context.watch<AuthController>();
-
-    return DecoratedBox(
+    return AuthBuilder(
+      builder: (context, auth) {
+        final top = MediaQuery.paddingOf(context).top;
+        return DecoratedBox(
       decoration: context.appPageDecoration,
       child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
@@ -175,24 +178,15 @@ class _ExtractionProfilePageState extends State<ExtractionProfilePage> {
                       _workflowStep(
                         '1',
                         'Extraction (vous)',
-                        ExtractionMockData.transitionExtraction,
+                        ExtractionWorkflow.transitionLabel,
                         highlight: true,
                       ),
-                      _workflowStep('2', 'Transport', 'STORED → IN_TRANSPORT'),
-                      _workflowStep('3', 'Réception', 'IN_TRANSPORT → DEPOT_RECEIVED'),
+                      _workflowStep('2', 'Transport', TransportWorkflow.transitionLabel),
+                      _workflowStep('3', 'Réception', ReceptionWorkflow.transitionLabel),
                       const SizedBox(height: 12),
                       Text(
                         'Responsabilités : minerais, QR, scan stockage.',
                         style: TextStyle(fontSize: 12, color: context.appOnSurfaceMuted),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Compte démo : extraction@mine.com / 1234',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: context.appOnSurfaceMuted,
-                          fontStyle: FontStyle.italic,
-                        ),
                       ),
                     ],
                   ),
@@ -215,6 +209,8 @@ class _ExtractionProfilePageState extends State<ExtractionProfilePage> {
           ),
         ],
       ),
+    );
+      },
     );
   }
 

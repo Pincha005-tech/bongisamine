@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../admin/admin_role_display.dart';
-import '../admin/admin_shell_screen.dart';
 import '../reception/reception_role.dart';
 import '../reception/reception_shell_screen.dart';
 import '../transport/transport_role.dart';
@@ -28,13 +26,16 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  AuthController? _auth;
+  bool _loading = true;
+  String? _role;
   int currentIndex = 0;
 
   void _goToTab(int index) {
     setState(() => currentIndex = index);
   }
 
-  late final List<Widget> _pages = [
+  late final List<Widget> _workerPages = [
     DashboardPage(onNavigateTab: _goToTab),
     const WorkersPage(),
     const ScanPage(),
@@ -52,36 +53,73 @@ class _HomeScreenState extends State<HomeScreen> {
   );
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final auth = context.read<AuthController>();
+    if (!identical(auth, _auth)) {
+      _auth?.removeListener(_onAuthChanged);
+      _auth = auth;
+      _auth!.addListener(_onAuthChanged);
+      _syncFromAuth();
+    }
+  }
+
+  @override
+  void dispose() {
+    _auth?.removeListener(_onAuthChanged);
+    super.dispose();
+  }
+
+  void _onAuthChanged() => _syncFromAuth();
+
+  void _syncFromAuth() {
+    final auth = _auth;
+    if (auth == null || !mounted) return;
+    final loading = auth.isLoading;
+    final role = auth.user?.role;
+    if (loading == _loading && role == _role) return;
+    setState(() {
+      _loading = loading;
+      _role = role;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthController>();
-    if (roleUsesAdminShell(auth.user?.role)) {
-      return const AdminShellScreen();
-    }
-    if (roleUsesReceptionShell(auth.user?.role)) {
-      return const ReceptionShellScreen();
-    }
-    if (roleUsesTransportShell(auth.user?.role)) {
-      return const TransportShellScreen();
-    }
-    if (roleUsesExtractionShell(auth.user?.role)) {
-      return const ExtractionShellScreen();
-    }
-    if (roleUsesControleShell(auth.user?.role)) {
-      return const ControleShellScreen();
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
+    if (roleUsesReceptionShell(_role)) {
+      return const ReceptionShellScreen(key: ValueKey('shell_reception'));
+    }
+    if (roleUsesTransportShell(_role)) {
+      return const TransportShellScreen(key: ValueKey('shell_transport'));
+    }
+    if (roleUsesExtractionShell(_role)) {
+      return const ExtractionShellScreen(key: ValueKey('shell_extraction'));
+    }
+    if (roleUsesControleShell(_role)) {
+      return const ControleShellScreen(key: ValueKey('shell_controle'));
+    }
+
+    return _buildWorkerShell(context);
+  }
+
+  Widget _buildWorkerShell(BuildContext context) {
     final theme = Theme.of(context);
-
     final isDark = theme.brightness == Brightness.dark;
     final barSurface = isDark ? AppColors.darkCard : AppColors.white;
-    final barBorder =
-        isDark ? AppColors.grayDark : AppColors.creamDark;
+    final barBorder = isDark ? AppColors.grayDark : AppColors.creamDark;
 
     return Scaffold(
+      key: const ValueKey('shell_worker'),
       backgroundColor: theme.scaffoldBackgroundColor,
       body: IndexedStack(
         index: currentIndex,
-        children: _pages,
+        children: _workerPages,
       ),
       bottomNavigationBar: Material(
         elevation: 4,
@@ -89,16 +127,13 @@ class _HomeScreenState extends State<HomeScreen> {
         color: barSurface,
         child: Container(
           decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(color: barBorder, width: 1),
-            ),
+            border: Border(top: BorderSide(color: barBorder, width: 1)),
           ),
           child: SafeArea(
             top: false,
             child: SizedBox(
               height: _tabBarHeight,
               child: Padding(
-                /// Expo `tabBarStyle`: paddingTop / paddingBottom 8
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
                 child: Theme(
                   data: theme.copyWith(
@@ -134,7 +169,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         label: 'Scan',
                       ),
                       BottomNavigationBarItem(
-                        /// Lucide `Activity` : courbe type « pouls » (distinct de BarChart3).
                         icon: Icon(Icons.monitor_heart_outlined, size: _iconSize),
                         label: 'Activités',
                       ),

@@ -8,10 +8,17 @@ import 'coree/routing/native_intent_redirect.dart';
 import 'coree/routes/app_routes.dart';
 import 'coree/theme/app_themes.dart';
 import 'coree/theme/theme_notifier.dart';
+import 'coree/utils/keyboard_utils.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppThemeController.initialize();
+
+  // Instance unique : ne pas utiliser ChangeNotifierProvider, qui réabonne
+  // l'InheritedProvider à notifyListeners() et peut déclencher l'assertion
+  // « ancestor is not true » quand l'arbre change (clavier, navigation).
+  // L'écoute se fait via ListenableBuilder / addListener, pas via Provider.watch.
+  final authController = AuthController();
 
   /// Équivalent `SplashScreen.preventAutoHideAsync` : le splash natif
   /// (`flutter_native_splash`) reste jusqu’au premier frame ; il disparaît
@@ -20,9 +27,7 @@ Future<void> main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(
-          create: (_) => AuthController(),
-        ),
+        Provider<AuthController>.value(value: authController),
         Provider<AppQueryClient>(create: (_) => const AppQueryClient()),
       ],
       child: const BongisaMineApp(),
@@ -60,6 +65,13 @@ class _BongisaMineAppState extends State<BongisaMineApp> {
       builder: (_, themeMode, __) {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
+          builder: (context, child) {
+            return GestureDetector(
+              onTap: () => KeyboardUtils.dismiss(),
+              behavior: HitTestBehavior.translucent,
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
           initialRoute: '/',
           onGenerateInitialRoutes: (String initialRouteName) {
             return NativeIntentRedirect.redirectSystemPath(

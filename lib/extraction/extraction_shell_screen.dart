@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../coree/colors/app_colors.dart';
+import '../coree/utils/keyboard_utils.dart';
 import 'extraction_alerts_page.dart';
 import 'extraction_home_page.dart';
 import 'extraction_minerals_page.dart';
@@ -15,21 +16,77 @@ class ExtractionShellScreen extends StatefulWidget {
   State<ExtractionShellScreen> createState() => _ExtractionShellScreenState();
 }
 
-class _ExtractionShellScreenState extends State<ExtractionShellScreen> {
+class _ExtractionShellScreenState extends State<ExtractionShellScreen>
+    with WidgetsBindingObserver {
   int _index = 0;
+  final _scanKey = GlobalKey<ExtractionScanPageState>();
 
-  void _goTab(int i) {
-    if (i < 0 || i > 4) return;
-    setState(() => _index = i);
+  late final List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      ExtractionHomePage(
+        key: const PageStorageKey<String>('extraction_home'),
+        onNavigateTab: _goTab,
+      ),
+      ExtractionScanPage(
+        key: _scanKey,
+        onNavigateTab: _goTab,
+      ),
+      ExtractionMineralsPage(
+        key: const PageStorageKey<String>('extraction_minerals'),
+        onNavigateTab: _goTab,
+        onOpenScanWithBatch: _openScanWithBatch,
+      ),
+      const ExtractionAlertsPage(
+        key: PageStorageKey<String>('extraction_alerts'),
+      ),
+      const ExtractionProfilePage(
+        key: PageStorageKey<String>('extraction_profile'),
+      ),
+    ];
   }
 
-  late final List<Widget> _pages = [
-    ExtractionHomePage(onNavigateTab: _goTab),
-    ExtractionScanPage(onNavigateTab: _goTab),
-    ExtractionMineralsPage(onNavigateTab: _goTab),
-    const ExtractionAlertsPage(),
-    const ExtractionProfilePage(),
-  ];
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    KeyboardUtils.dismiss();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      KeyboardUtils.dismiss();
+    }
+  }
+
+  void _selectTab(int i) {
+    if (i < 0 || i > 4) return;
+    if (_index == i) return;
+    KeyboardUtils.dismiss();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _index = i);
+    });
+  }
+
+  void _goTab(int i) => _selectTab(i);
+
+  void _openScanWithBatch(String batch) {
+    final code = batch.trim();
+    KeyboardUtils.dismiss();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _index = 1);
+      if (code.isNotEmpty) {
+        _scanKey.currentState?.applyBatchPrefill(code);
+      }
+    });
+  }
 
   static const double _tabBarHeight = 72;
   static const double _iconSize = 22;
@@ -84,7 +141,7 @@ class _ExtractionShellScreenState extends State<ExtractionShellScreen> {
                     selectedLabelStyle: _tabLabelStyle,
                     unselectedLabelStyle: _tabLabelStyle,
                     iconSize: _iconSize,
-                    onTap: (i) => setState(() => _index = i),
+                    onTap: _selectTab,
                     items: [
                       BottomNavigationBarItem(
                         icon: Icon(Icons.home_outlined, size: _iconSize),
