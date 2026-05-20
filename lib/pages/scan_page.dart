@@ -1,14 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../coree/api/api_exception.dart';
-import '../coree/auth/auth_controller.dart';
-import '../coree/auth/app_roles.dart';
 import '../coree/colors/app_colors.dart';
-import '../coree/traceability_rules.dart';
 import '../coree/theme/app_page_style.dart';
-import '../services/qr_service.dart';
-import '../services/traceability_service.dart';
+import '../coree/face/face_capture_result.dart';
 import 'scan/face_scan_screen.dart';
 import 'scan/live_qr_scan_screen.dart';
 
@@ -58,181 +52,42 @@ class _ScanPageState extends State<ScanPage> {
   ScanRecordType _mode = ScanRecordType.qr;
   bool _openingCamera = false;
   String? _lastResult;
-  final List<ScanRecord> _history = [];
-
-  bool get _isSupervisor {
-    final auth = context.read<AuthController>();
-    return auth.isSupervisor ||
-        AppRoles.isSupervisorApiRole(auth.apiRole);
-  }
 
   Future<void> _openCameraScan() async {
     if (_openingCamera) return;
     setState(() => _openingCamera = true);
     try {
-      final isAgent = context.read<AuthController>().isAgent;
-      if (isAgent || _mode == ScanRecordType.face) {
-        await _scanFaceFlow();
+      if (_mode == ScanRecordType.qr) {
+        final raw = await Navigator.push<String>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const LiveQrScanScreen(),
+            fullscreenDialog: true,
+          ),
+        );
+        if (raw != null && mounted) {
+          setState(() => _lastResult = raw);
+        }
       } else {
-        await _scanQrFlow();
+        final face = await Navigator.push<FaceCaptureResult>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const FaceScanScreen(),
+            fullscreenDialog: true,
+          ),
+        );
+        if (face != null && face.matched && mounted) {
+          setState(() => _lastResult = face.workerName ?? 'Visage reconnu');
+        }
       }
     } finally {
       if (mounted) setState(() => _openingCamera = false);
     }
   }
 
-  Future<void> _scanFaceFlow() async {
-    final name = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const FaceScanScreen(),
-        fullscreenDialog: true,
-      ),
-    );
-    if (name != null && mounted) {
-      setState(() {
-        _lastResult = name;
-        _history.insert(
-          0,
-          ScanRecord(
-            id: DateTime.now().millisecondsSinceEpoch.toString(),
-            type: ScanRecordType.face,
-            value: name,
-            time: _nowLabel(),
-          ),
-        );
-      });
-    }
-  }
-
-  Future<void> _scanQrFlow() async {
-    final raw = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const LiveQrScanScreen(),
-        fullscreenDialog: true,
-      ),
-    );
-    if (raw == null || !mounted) return;
-
-    final parsed = QrService.parseScannedPayload(raw);
-    if (parsed.signature.isEmpty) {
-      _showSnack('QR invalide (signature manquante)', isError: true);
-      return;
-    }
-
-    final auth = context.read<AuthController>();
-
-    Map<String, dynamic> verify;
-    try {
-      verify = await QrService.verify(parsed.data, parsed.signature);
-    } catch (e) {
-      _showScanError(e);
-      return;
-    }
-
-    final valid = verify['valid'] as bool? ?? false;
-    if (!valid) {
-      _showSnack(
-        verify['message'] as String? ?? 'QR invalide',
-        isError: true,
-      );
-      return;
-    }
-
-    if (!_isSupervisor) {
-      setState(() => _lastResult = verify['batch_code'] as String? ?? raw);
-      _showSnack(verify['message'] as String? ?? 'QR valide');
-      return;
-    }
-
-    final currentStatus = verify['current_status'] as String?;
-    if (!TraceabilityRules.canScan(auth.apiRole, currentStatus)) {
-      _showSnack(
-        TraceabilityRules.blockedMessage(auth.apiRole, currentStatus),
-        isError: true,
-      );
-      return;
-    }
-
-    final photoPath = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const FaceScanScreen(captureOnly: true),
-        fullscreenDialog: true,
-      ),
-    );
-    if (photoPath == null || !mounted) return;
-
-    try {
-      final movement = await TraceabilityService.scan(
-        apiRole: auth.apiRole,
-        imagePath: photoPath,
-        qrData: parsed.data,
-        qrSignature: parsed.signature,
-        currentStatus: currentStatus,
-      );
-      if (!mounted) return;
-      setState(() {
-        _lastResult =
-            '${movement.previousStatus ?? "?"} → ${movement.newStatus}';
-        _history.insert(
-          0,
-          ScanRecord(
-            id: movement.id.toString(),
-            type: ScanRecordType.qr,
-            value: _lastResult!,
-            time: _nowLabel(),
-          ),
-        );
-      });
-      _showSnack('Lot mis à jour : ${movement.newStatus}');
-    } catch (e) {
-      _showScanError(e);
-    }
-  }
-
-  void _showScanError(Object e) {
-    if (e is ApiException) {
-      final msg = e.message.toLowerCase();
-      if (e.statusCode == 403 && msg.contains('visage')) {
-        _showSnack(
-          'Visage non reconnu. Enregistrez d\'abord le visage de l\'ouvrier '
-          '(menu travailleurs / empreinte faciale).',
-          isError: true,
-        );
-        return;
-      }
-      if (msg.contains('transition')) {
-        _showSnack(e.message, isError: true);
-        return;
-      }
-      _showSnack(e.message, isError: true);
-      return;
-    }
-    _showSnack(e.toString(), isError: true);
-  }
-
-  String _nowLabel() {
-    final n = DateTime.now();
-    return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}';
-  }
-
-  void _showSnack(String msg, {bool isError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        backgroundColor: isError ? AppColors.error : AppColors.success,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.paddingOf(context).top;
-    final auth = context.watch<AuthController>();
-    final isAgent = auth.isAgent;
-    final showRoleHint = !isAgent && _isSupervisor;
 
     return DecoratedBox(
       decoration: context.appPageDecoration,
@@ -255,9 +110,7 @@ class _ScanPageState extends State<ScanPage> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    isAgent
-                        ? 'Reconnaissance faciale terrain'
-                        : 'Scan QR lot + contrôle visage',
+                    'Enregistrez une présence',
                     style: TextStyle(
                       fontSize: 14,
                       color: context.appOnSurfaceMuted,
@@ -268,42 +121,7 @@ class _ScanPageState extends State<ScanPage> {
               ),
             ),
           ),
-          if (!isAgent) SliverToBoxAdapter(child: _buildModeToggle()),
-          if (showRoleHint)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: Material(
-                  color: context.appCardColor,
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          Icons.info_outline_rounded,
-                          size: 20,
-                          color: context.appTitleAccent,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            TraceabilityRules.roleHint(auth.apiRole),
-                            style: TextStyle(
-                              fontSize: 12,
-                              height: 1.35,
-                              color: context.appOnSurfaceMuted,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          SliverToBoxAdapter(child: _buildModeToggle()),
           SliverToBoxAdapter(child: _buildScanArea()),
           SliverToBoxAdapter(child: _buildHistorySection()),
           const SliverToBoxAdapter(child: SizedBox(height: 32)),
@@ -501,13 +319,9 @@ class _ScanPageState extends State<ScanPage> {
                 ],
               ),
               const SizedBox(height: 12),
-              ...List.generate(
-                _history.isNotEmpty ? _history.length : _recentScans.length,
-                (i) {
-                final scans =
-                    _history.isNotEmpty ? _history : _recentScans;
-                final scan = scans[i];
-                final isLast = i == scans.length - 1;
+              ...List.generate(_recentScans.length, (i) {
+                final scan = _recentScans[i];
+                final isLast = i == _recentScans.length - 1;
                 return Container(
                   decoration: BoxDecoration(
                     border: isLast

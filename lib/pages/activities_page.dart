@@ -3,66 +3,9 @@ import 'package:flutter/material.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import '../services/activity_service.dart';
-
-class ActivityLog {
-  const ActivityLog({
-    required this.name,
-    required this.action,
-    required this.time,
-  });
-
-  final String name;
-  final String action;
-  final String time;
-
-  factory ActivityLog.fromMap(Map<String, dynamic> map) {
-    return ActivityLog(
-      name: map['name'] as String? ?? '',
-      action: map['action'] as String? ?? '',
-      time: map['time'] as String? ?? '',
-    );
-  }
-}
-
-/// Données de démo (aligné scan / travailleurs quand le backend est indisponible).
-const List<ActivityLog> _mockActivities = [
-  ActivityLog(
-    name: 'Jean Mukendi',
-    action: 'Scan QR',
-    time: '08:14',
-  ),
-  ActivityLog(
-    name: 'Marie Kabila',
-    action: 'Reconnaissance faciale',
-    time: '08:12',
-  ),
-  ActivityLog(
-    name: 'Pierre Tshibangu',
-    action: 'Scan QR',
-    time: '08:09',
-  ),
-  ActivityLog(
-    name: 'Anne Mbuyi',
-    action: 'Scan QR',
-    time: '08:01',
-  ),
-  ActivityLog(
-    name: 'David Kasongo',
-    action: 'Reconnaissance faciale',
-    time: '07:55',
-  ),
-  ActivityLog(
-    name: 'Grace Lumba',
-    action: 'Scan QR',
-    time: '07:48',
-  ),
-  ActivityLog(
-    name: 'Charles Ilunga',
-    action: 'Départ site',
-    time: 'Hier 17:30',
-  ),
-];
+import '../models/activity_log.dart';
+import '../services/api_service.dart';
+import 'activities_tracker_map_page.dart';
 
 String _anonymize(String name) {
   final parts = name.trim().split(RegExp(r'\s+'));
@@ -91,7 +34,6 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
   bool _isLoading = true;
   bool _isLoadingMore = false;
   bool _hasMore = true;
-  bool _usingMock = false;
   String? _error;
   int _page = 1;
 
@@ -103,33 +45,12 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
     _loadActivities();
   }
 
-  Future<List<ActivityLog>?> _fetchFromApi(int page) async {
-    try {
-      final items = await ActivityService.fetchPage(page: page, limit: _pageSize);
-      return items
-          .map(
-            (e) => ActivityLog(name: e.name, action: e.action, time: e.time),
-          )
-          .toList();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  List<ActivityLog> _mockPage(int page) {
-    final start = (page - 1) * _pageSize;
-    if (start >= _mockActivities.length) return [];
-    final end = (start + _pageSize).clamp(0, _mockActivities.length);
-    return _mockActivities.sublist(start, end);
-  }
-
   Future<void> _loadActivities({bool loadMore = false}) async {
     if (loadMore && (_isLoadingMore || !_hasMore)) return;
 
     if (!loadMore) {
       _page = 1;
       _hasMore = true;
-      _usingMock = false;
       _error = null;
     }
 
@@ -142,37 +63,28 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
       }
     });
 
-    List<ActivityLog> batch = [];
-    var fromApi = false;
-
-    final apiBatch = await _fetchFromApi(_page);
-    if (apiBatch != null) {
-      batch = apiBatch;
-      fromApi = true;
-    } else {
-      batch = _mockPage(_page);
-      if (!loadMore && _page == 1) {
-        _usingMock = true;
-        _error = 'Serveur indisponible — affichage des activités récentes (démo).';
-      }
-    }
+    final batch = await ApiService.fetchActivitiesPage(
+      page: _page,
+      pageSize: _pageSize,
+    );
 
     if (!mounted) return;
     setState(() {
-      if (loadMore) {
-        _logs.addAll(batch);
+      if (batch == null) {
+        _error = 'Impossible de charger les activités';
+        if (!loadMore) _logs.clear();
+        _hasMore = false;
       } else {
-        _logs
-          ..clear()
-          ..addAll(batch);
+        if (loadMore) {
+          _logs.addAll(batch);
+        } else {
+          _logs
+            ..clear()
+            ..addAll(batch);
+        }
+        _hasMore = batch.length >= _pageSize;
+        if (batch.isNotEmpty) _page++;
       }
-
-      _hasMore = fromApi
-          ? batch.length >= _pageSize
-          : batch.isNotEmpty &&
-              _page * _pageSize < _mockActivities.length;
-
-      if (batch.isNotEmpty) _page++;
       _isLoading = false;
       _isLoadingMore = false;
     });
@@ -196,16 +108,45 @@ class _ActivitiesPageState extends State<ActivitiesPage> {
         children: [
           Padding(
             padding: EdgeInsets.fromLTRB(20, topPad + 24, 20, 8),
-            child: Text(
-              'Activités',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-                color: context.appTitleAccent,
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Activités',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: context.appTitleAccent,
+                    ),
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ActivitiesTrackerMapPage(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.map_rounded, size: 20),
+                  label: const Text('Carte GPS'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          if (_usingMock && _error != null)
+          if (_error != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Material(

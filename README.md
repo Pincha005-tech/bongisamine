@@ -9,8 +9,10 @@ Application Flutter de gestion de présence et d’activités (migration depuis 
 ```powershell
 cd bongisamine
 flutter pub get
-flutter run
+flutter run --dart-define=API_BASE_URL=https://bongisa-mine-api.onrender.com
 ```
+
+**Run, build APK/AAB et choix de l’URL API (local / Render)** : voir **[RUN_BUILD.md](./RUN_BUILD.md)**.
 
 ## Contribution et merge
 

@@ -5,7 +5,14 @@ import '../../coree/colors/app_colors.dart';
 
 /// Plein écran : ouvre la caméra et renvoie le texte du QR scanné.
 class LiveQrScanScreen extends StatefulWidget {
-  const LiveQrScanScreen({super.key});
+  const LiveQrScanScreen({
+    super.key,
+    this.title = 'Scanner QR — présence',
+    this.hint = 'Cadrez le QR code du badge ou du sac minier dans le carré.',
+  });
+
+  final String title;
+  final String hint;
 
   @override
   State<LiveQrScanScreen> createState() => _LiveQrScanScreenState();
@@ -72,11 +79,11 @@ class _LiveQrScanScreenState extends State<LiveQrScanScreen> {
                         icon: const Icon(Icons.close_rounded,
                             color: Colors.white),
                       ),
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Scanner QR — présence',
+                          widget.title,
                           textAlign: TextAlign.center,
-                          style: TextStyle(
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 17,
                             fontWeight: FontWeight.w700,
@@ -109,10 +116,10 @@ class _LiveQrScanScreenState extends State<LiveQrScanScreen> {
                         size: 40,
                       ),
                       const SizedBox(height: 12),
-                      const Text(
-                        'Cadrez le QR code du badge ou du sac minier dans le carré.',
+                      Text(
+                        widget.hint,
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 15,
                           fontWeight: FontWeight.w600,

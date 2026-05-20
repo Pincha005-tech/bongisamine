@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/routes/app_routes.dart';
+import '../coree/utils/keyboard_utils.dart';
 
 /// Équivalent Expo `app/signup.tsx` : dégradé, formulaire, validation, `useAuth().signup`.
 class SignUpScreen extends StatefulWidget {

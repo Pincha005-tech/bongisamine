@@ -4,12 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../Screens/login_screen.dart';
+import '../coree/auth/auth_builder.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import '../coree/api/api_config.dart';
-import '../services/api_service.dart';
 import 'changepass_page.dart';
 import 'privacy/privacy_page.dart';
 
@@ -23,7 +22,6 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _notifications = true;
-  final _apiUrlController = TextEditingController();
 
   String _name = 'Utilisateur';
   String _email = '';
@@ -34,53 +32,17 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
-    _apiUrlController.text = ApiConfig.baseUrl;
     appThemeModeNotifier.addListener(_onThemeChanged);
-    unawaited(_loadProfile());
   }
 
   @override
   void dispose() {
-    _apiUrlController.dispose();
     appThemeModeNotifier.removeListener(_onThemeChanged);
     super.dispose();
   }
 
-  Future<void> _saveApiUrl() async {
-    await ApiConfig.setBaseUrl(_apiUrlController.text);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('API : ${ApiConfig.baseUrl}'),
-        backgroundColor: AppColors.success,
-      ),
-    );
-  }
-
   void _onThemeChanged() {
     if (mounted) setState(() {});
-  }
-
-  Future<void> _loadProfile() async {
-    final auth = context.read<AuthController>();
-    if (auth.user != null) {
-      setState(() {
-        _name = auth.name;
-        _email = auth.email;
-        _role = auth.apiRole.isNotEmpty ? auth.apiRole : auth.role.toUpperCase();
-      });
-      return;
-    }
-    final profile = await ApiService.getUserProfile();
-    if (!mounted) return;
-    setState(() {
-      _name = (profile['name'] as String?)?.trim().isNotEmpty == true
-          ? profile['name'] as String
-          : 'Utilisateur';
-      _email = (profile['email'] as String?) ?? '';
-      final r = profile['role'] as String?;
-      _role = (r != null && r.isNotEmpty) ? r.toUpperCase() : 'WORKER';
-    });
   }
 
   Future<void> _confirmLogout() async {
@@ -115,9 +77,15 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.paddingOf(context).top;
+    return AuthBuilder(
+      builder: (context, auth) {
+        final u = auth.user;
+        final name = u?.name ?? _name;
+        final email = u?.email ?? _email;
+        final role = (u?.role ?? _role).toUpperCase();
+        final topPad = MediaQuery.paddingOf(context).top;
 
-    return DecoratedBox(
+        return DecoratedBox(
       decoration: context.appPageDecoration,
       child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
@@ -135,7 +103,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
           ),
-          SliverToBoxAdapter(child: _buildProfileCard()),
+          SliverToBoxAdapter(child: _buildProfileCard(name, email, role)),
           SliverToBoxAdapter(
             child: _buildSection(
               title: 'Compte',
@@ -173,65 +141,6 @@ class _SettingsPageState extends State<SettingsPage> {
               title: 'Système',
               child: _buildCard(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'URL de l\'API',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        TextField(
-                          controller: _apiUrlController,
-                          decoration: const InputDecoration(
-                            hintText: 'https://bongisa-mine-api.onrender.com',
-                            isDense: true,
-                            border: OutlineInputBorder(),
-                          ),
-                          keyboardType: TextInputType.url,
-                          autocorrect: false,
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            TextButton(
-                              onPressed: _saveApiUrl,
-                              child: const Text('Enregistrer'),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                await ApiConfig.resetBaseUrlToProduction();
-                                _apiUrlController.text = ApiConfig.baseUrl;
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('URL Render par défaut'),
-                                    ),
-                                  );
-                                }
-                              },
-                              child: const Text('Render'),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          'Doit être la même API que le centre de contrôle web.',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withValues(alpha: 0.65),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                   _SettingItem(
                     icon: Icons.dark_mode_outlined,
                     label: 'Mode sombre',
@@ -266,9 +175,11 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+      },
+    );
   }
 
-  Widget _buildProfileCard() {
+  Widget _buildProfileCard(String name, String email, String role) {
     final cardColor = Theme.of(context).cardColor;
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
@@ -303,7 +214,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _name,
+                      name,
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w800,
@@ -312,7 +223,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _email.isEmpty ? '—' : _email,
+                      email.isEmpty ? '—' : email,
                       style: TextStyle(
                         fontSize: 13,
                         color: onSurface.withValues(alpha: 0.7),
@@ -330,7 +241,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
-                        _role,
+                        role,
                         style: const TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w800,

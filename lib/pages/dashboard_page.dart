@@ -2,107 +2,159 @@ import 'dart:async';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../coree/auth/auth_builder.dart';
+import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../services/api_service.dart';
-import '../services/dashboard_service.dart';
-import '../models/dashboard_stats.dart';
 
-/// Données alignées sur `expo/app/(tabs)/dashboard.tsx`
-const List<_BarDatum> _barData = [
-  _BarDatum('Lun', 45),
-  _BarDatum('Mar', 62),
-  _BarDatum('Mer', 38),
-  _BarDatum('Jeu', 75),
-  _BarDatum('Ven', 55),
-  _BarDatum('Sam', 30),
-  _BarDatum('Dim', 20),
-];
-
-/// Indice de productivité mensuel (0–100) — 12 mois.
-const List<_MonthDatum> _monthlyProductivity = [
-  _MonthDatum('Jan', 62),
-  _MonthDatum('Fév', 68),
-  _MonthDatum('Mar', 71),
-  _MonthDatum('Avr', 69),
-  _MonthDatum('Mai', 74),
-  _MonthDatum('Jun', 78),
-  _MonthDatum('Jul', 82),
-  _MonthDatum('Aoû', 80),
-  _MonthDatum('Sep', 85),
-  _MonthDatum('Oct', 88),
-  _MonthDatum('Nov', 91),
-  _MonthDatum('Déc', 95),
-];
-
-class _MonthDatum {
-  const _MonthDatum(this.label, this.value);
-  final String label;
-  final int value;
-}
-
-int get _weekScanTotal => _barData.fold(0, (s, d) => s + d.value);
-
-_BarDatum get _peakDay {
-  return _barData.reduce(
-    (a, b) => a.value >= b.value ? a : b,
-  );
-}
-
-class _BarDatum {
-  const _BarDatum(this.label, this.value);
-  final String label;
-  final int value;
-}
-
+/// Tableau de bord — KPIs depuis `GET /dashboard/` et `GET /reports/daily`.
 class DashboardPage extends StatefulWidget {
-  const DashboardPage({super.key});
+  const DashboardPage({super.key, this.onNavigateTab});
+
+  final void Function(int tabIndex)? onNavigateTab;
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
+class _BarDatum {
+  const _BarDatum(this.label, this.value);
+  final String label;
+  final double value;
+}
+
+class _MonthDatum {
+  const _MonthDatum(this.label, this.value);
+  final String label;
+  final double value;
+}
+
+const _weekdayLabels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+
 class _DashboardPageState extends State<DashboardPage> {
-  String _userName = 'Utilisateur';
-  DashboardStats? _stats;
-  bool _statsLoading = true;
+  bool _refreshing = false;
+  bool _loading = true;
+  Map<String, dynamic>? _dashboard;
+  Map<String, dynamic>? _daily;
+  List<_BarDatum> _weeklyBars = [];
+  List<_MonthDatum> _monthlyLine = [];
 
   @override
   void initState() {
     super.initState();
-    unawaited(_load());
+    _loadData();
   }
 
-  Future<void> _load() async {
-    await _loadUserName();
-    try {
-      final s = await DashboardService.stats();
-      if (mounted) {
-        setState(() {
-          _stats = s;
-          _statsLoading = false;
-        });
+  List<_BarDatum> _buildWeeklyBars(List<Map<String, dynamic>> history) {
+    final now = DateTime.now();
+    final counts = List<double>.filled(7, 0);
+    for (final h in history) {
+      final created = DateTime.tryParse(h['created_at'] as String? ?? '');
+      if (created == null) continue;
+      final diff = now.difference(created).inDays;
+      if (diff >= 0 && diff < 7) {
+        counts[6 - diff] += 1;
       }
-    } catch (_) {
-      if (mounted) setState(() => _statsLoading = false);
     }
+    return List.generate(7, (i) => _BarDatum(_weekdayLabels[i], counts[i]));
   }
 
-  Future<void> _loadUserName() async {
-    final profile = await ApiService.getUserProfile();
-    final name = profile['name'] as String?;
-    if (!mounted || name == null || name.isEmpty) return;
-    setState(() => _userName = name);
+  List<_MonthDatum> _buildMonthlyLine(List<Map<String, dynamic>> history) {
+    final now = DateTime.now();
+    final monthLabels = <String>[];
+    final counts = <double>[];
+    for (var i = 5; i >= 0; i--) {
+      final d = DateTime(now.year, now.month - i, 1);
+      monthLabels.add(_monthShort(d.month));
+      counts.add(0);
+    }
+    for (final h in history) {
+      final created = DateTime.tryParse(h['created_at'] as String? ?? '');
+      if (created == null) continue;
+      for (var i = 0; i < 6; i++) {
+        final anchor = DateTime(now.year, now.month - (5 - i), 1);
+        if (created.year == anchor.year && created.month == anchor.month) {
+          counts[i] += 1;
+          break;
+        }
+      }
+    }
+    return List.generate(6, (i) => _MonthDatum(monthLabels[i], counts[i]));
   }
 
-  Future<void> _onRefresh() async => _load();
+  String _monthShort(int month) {
+    const names = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+    return names[(month - 1).clamp(0, 11)];
+  }
+
+  Future<void> _loadData() async {
+    final dashboard = await ApiService.fetchDashboard();
+    final daily = await ApiService.fetchDailyReport();
+    final history = await ApiService.fetchMineralHistory();
+    if (!mounted) return;
+    setState(() {
+      _dashboard = dashboard;
+      _daily = daily;
+      _weeklyBars = _buildWeeklyBars(history);
+      _monthlyLine = _buildMonthlyLine(history);
+      _loading = false;
+      _refreshing = false;
+    });
+  }
+
+  Future<void> _onRefresh() async {
+    setState(() => _refreshing = true);
+    await _loadData();
+  }
+
+  String _statWorkers() {
+    final w = _dashboard?['workers'] ?? _daily?['workers'];
+    if (w is int) return '$w';
+    if (w is Map && w['total'] != null) return '${w['total']}';
+    return '—';
+  }
+
+  String _statScans() {
+    final q = _dashboard?['qrcodes'];
+    if (q is int) return '$q';
+    final m = _dashboard?['lot_movements'];
+    if (m is int) return '$m';
+    return '—';
+  }
+
+  String _statActive() {
+    final att = _daily?['attendance'];
+    if (att is Map) {
+      final present = att['total_present'] as int? ?? 0;
+      final total = (_dashboard?['workers'] as int?) ?? present;
+      if (total > 0) {
+        return '${(present / total * 100).toStringAsFixed(1)} %';
+      }
+    }
+    return '—';
+  }
+
+  String _statProductivity() {
+    final trace = _daily?['traceability'];
+    if (trace is Map && trace['total_movements'] != null) {
+      return '${trace['total_movements']}';
+    }
+    final m = _dashboard?['lot_movements'];
+    if (m is int) return '$m';
+    return '—';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final topPad = MediaQuery.paddingOf(context).top;
+    return AuthBuilder(
+      builder: (context, auth) {
+        final topPad = MediaQuery.paddingOf(context).top;
+        final displayName = auth.name;
 
-    return DecoratedBox(
+        return DecoratedBox(
       decoration: context.appPageDecoration,
       child: RefreshIndicator(
         color: AppColors.primary,
@@ -114,43 +166,45 @@ class _DashboardPageState extends State<DashboardPage> {
           slivers: [
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(20, topPad + 24, 20, 20),
+                padding: EdgeInsets.fromLTRB(20, topPad + 24, 20, 8),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Bonjour,',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: context.appOnSurfaceMuted,
-                            fontWeight: FontWeight.w500,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Bonjour,',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                              color: context.appOnSurfaceMuted,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _userName,
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            color: context.appTitleAccent,
+                          const SizedBox(height: 2),
+                          Text(
+                            displayName,
+                            style: TextStyle(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                              color: context.appTitleAccent,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     Container(
-                      width: 48,
-                      height: 48,
+                      width: 52,
+                      height: 52,
                       decoration: const BoxDecoration(
                         color: AppColors.primary,
                         shape: BoxShape.circle,
                       ),
+                      alignment: Alignment.center,
                       child: const Icon(
                         Icons.engineering_rounded,
-                        size: 24,
+                        size: 28,
                         color: AppColors.cream,
                       ),
                     ),
@@ -158,81 +212,131 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ),
             ),
-            SliverToBoxAdapter(
+            if (_refreshing)
+              const SliverToBoxAdapter(
+                child: LinearProgressIndicator(
+                  minHeight: 2,
+                  color: AppColors.primary,
+                  backgroundColor: AppColors.creamDark,
+                ),
+              ),
+            if (_loading)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              )
+            else
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final gap = 12.0;
+                      final w = (constraints.maxWidth - gap) / 2;
+                      return Wrap(
+                        spacing: gap,
+                        runSpacing: gap,
+                        children: [
+                          SizedBox(
+                            width: w,
+                            child: _StatCard(
+                              icon: Icons.groups_rounded,
+                              label: 'Travailleurs',
+                              value: _statWorkers(),
+                              delta: 'API',
+                              positive: true,
+                            ),
+                          ),
+                          SizedBox(
+                            width: w,
+                            child: _StatCard(
+                              icon: Icons.document_scanner_outlined,
+                              label: 'QR / mouvements',
+                              value: _statScans(),
+                              delta: 'API',
+                              positive: true,
+                            ),
+                          ),
+                          SizedBox(
+                            width: w,
+                            child: _StatCard(
+                              icon: Icons.layers_rounded,
+                              label: 'Présence',
+                              value: _statActive(),
+                              delta: 'jour',
+                              positive: true,
+                            ),
+                          ),
+                          SizedBox(
+                            width: w,
+                            child: _StatCard(
+                              icon: Icons.trending_up_rounded,
+                              label: 'Mouvements',
+                              value: _statProductivity(),
+                              delta: 'traçabilité',
+                              positive: true,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            const SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final gap = 12.0;
-                    final w = (constraints.maxWidth - gap) / 2;
-                    return Wrap(
-                      spacing: gap,
-                      runSpacing: gap,
-                      children: [
-                        SizedBox(
-                          width: w,
-                          child: _StatCard(
-                            icon: Icons.groups_rounded,
-                            label: 'Travailleurs',
-                            value: _stats != null
-                                ? '${_stats!.workers}'
-                                : (_statsLoading ? '…' : '—'),
-                            change: 'API',
-                            changeHint: 'base serveur',
-                            up: true,
-                          ),
-                        ),
-                        SizedBox(
-                          width: w,
-                          child: _StatCard(
-                            icon: Icons.document_scanner_outlined,
-                            label: 'Mouvements lots',
-                            value: _stats != null
-                                ? '${_stats!.lotMovements}'
-                                : (_statsLoading ? '…' : '—'),
-                            change: 'API',
-                            changeHint: 'traçabilité',
-                            up: true,
-                          ),
-                        ),
-                        SizedBox(
-                          width: w,
-                          child: _StatCard(
-                            icon: Icons.verified_user_outlined,
-                            label: 'Présences',
-                            value: _stats != null
-                                ? '${_stats!.attendances}'
-                                : (_statsLoading ? '…' : '—'),
-                            change: 'API',
-                            changeHint: 'enregistrements',
-                            up: true,
-                          ),
-                        ),
-                        SizedBox(
-                          width: w,
-                          child: _StatCard(
-                            icon: Icons.trending_up_rounded,
-                            label: 'QR actifs',
-                            value: _stats != null
-                                ? '${_stats!.qrcodes}'
-                                : (_statsLoading ? '…' : '—'),
-                            change: '${_stats?.alerts ?? 0} alertes',
-                            changeHint: 'dont ${_stats?.criticalAlerts ?? 0} critiques',
-                            up: true,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Text(
+                  'Production hebdomadaire',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary,
+                  ),
                 ),
               ),
             ),
-            SliverToBoxAdapter(child: _WeeklyBarChartCard()),
-            const SliverToBoxAdapter(child: _MonthlyLineChartCard()),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _WeeklyBarChartCard(
+                  data: _weeklyBars.isEmpty
+                      ? List.generate(7, (i) => _BarDatum(_weekdayLabels[i], 0))
+                      : _weeklyBars,
+                ),
+              ),
+            ),
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Text(
+                  'Tendance mensuelle (tonnes)',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _MonthlyLineChartCard(
+                  data: _monthlyLine.isEmpty
+                      ? List.generate(6, (i) => _MonthDatum(_monthShort(i + 1), 0))
+                      : _monthlyLine,
+                ),
+              ),
+            ),
             const SliverToBoxAdapter(child: SizedBox(height: 32)),
           ],
         ),
       ),
+    );
+      },
     );
   }
 }
@@ -242,21 +346,20 @@ class _StatCard extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
-    required this.change,
-    required this.changeHint,
-    required this.up,
+    required this.delta,
+    required this.positive,
   });
 
   final IconData icon;
   final String label;
   final String value;
-  final String change;
-  final String changeHint;
-  final bool up;
+  final String delta;
+  final bool positive;
 
   @override
   Widget build(BuildContext context) {
-    final changeColor = up ? AppColors.success : AppColors.error;
+    final deltaColor =
+        positive ? AppColors.success : AppColors.warning;
 
     return Material(
       color: context.appCardColor,
@@ -264,21 +367,34 @@ class _StatCard extends StatelessWidget {
       shadowColor: AppColors.black.withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: context.appIconTileBg,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 22, color: context.appTitleAccent),
+            Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: AppColors.cream,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(icon, size: 20, color: AppColors.primary),
+                ),
+                const Spacer(),
+                Text(
+                  delta,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: deltaColor,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Text(
               value,
               style: TextStyle(
@@ -292,36 +408,8 @@ class _StatCard extends StatelessWidget {
               label,
               style: TextStyle(
                 fontSize: 12,
+                fontWeight: FontWeight.w600,
                 color: context.appOnSurfaceMuted,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(
-                  up ? Icons.north_east_rounded : Icons.south_east_rounded,
-                  size: 14,
-                  color: changeColor,
-                ),
-                const SizedBox(width: 2),
-                Text(
-                  change,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: changeColor,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              changeHint,
-              style: TextStyle(
-                fontSize: 10,
-                color: context.appOnSurfaceMuted,
-                fontWeight: FontWeight.w500,
               ),
             ),
           ],
@@ -332,417 +420,286 @@ class _StatCard extends StatelessWidget {
 }
 
 class _WeeklyBarChartCard extends StatefulWidget {
-  const _WeeklyBarChartCard();
+  const _WeeklyBarChartCard({required this.data});
+
+  final List<_BarDatum> data;
 
   @override
   State<_WeeklyBarChartCard> createState() => _WeeklyBarChartCardState();
 }
 
 class _WeeklyBarChartCardState extends State<_WeeklyBarChartCard> {
-  static const int _highlightIndex = 3;
-
-  int? _touchedBarIndex;
+  int? _touchedIndex;
 
   @override
   Widget build(BuildContext context) {
-    const maxY = 80.0;
-    final peak = _peakDay;
-    final muted = context.appOnSurfaceMuted;
-    final onSurface = context.appOnSurface;
+    final maxY = widget.data
+            .map((e) => e.value)
+            .reduce((a, b) => a > b ? a : b) *
+        1.15;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Material(
-        color: context.appCardColor,
-        elevation: 3,
-        shadowColor: AppColors.black.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Scans de présence — 7 derniers jours',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: onSurface,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Chaque barre = nombre de passages enregistrés (QR ou visage) ce jour-là.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: muted,
-                  height: 1.35,
-                ),
-              ),
-              const SizedBox(height: 10),
+    return Material(
+      color: context.appCardColor,
+      elevation: 2,
+      shadowColor: AppColors.black.withValues(alpha: 0.05),
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 16, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_touchedIndex != null)
               _ChartSummaryChip(
-                icon: Icons.summarize_outlined,
-                text:
-                    '$_weekScanTotal scans cette semaine · Pic : ${peak.label} (${peak.value})',
+                label: widget.data[_touchedIndex!].label,
+                value: '${widget.data[_touchedIndex!].value.toInt()} t',
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 220,
-                child: BarChart(
-                  BarChartData(
-                    maxY: maxY,
-                    alignment: BarChartAlignment.spaceAround,
-                    gridData: FlGridData(
-                      show: true,
-                      drawVerticalLine: false,
-                      horizontalInterval: 20,
-                      getDrawingHorizontalLine: (_) => FlLine(
-                        color: context.appDividerOnPage,
-                        strokeWidth: 1,
-                      ),
+            SizedBox(
+              height: 200,
+              child: BarChart(
+                BarChartData(
+                  maxY: maxY,
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: 20,
+                    getDrawingHorizontalLine: (_) => FlLine(
+                      color: AppColors.grayLight.withValues(alpha: 0.8),
+                      strokeWidth: 1,
                     ),
-                    borderData: FlBorderData(show: false),
-                    titlesData: FlTitlesData(
-                      topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      leftTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          reservedSize: 32,
-                          interval: 20,
-                          getTitlesWidget: (v, _) => Text(
-                            v.toInt().toString(),
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: muted,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        axisNameWidget: Text(
-                          'Scans',
-                          style: TextStyle(
+                  ),
+                  borderData: FlBorderData(show: false),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 28,
+                        getTitlesWidget: (v, _) => Text(
+                          v.toInt().toString(),
+                          style: const TextStyle(
                             fontSize: 10,
-                            color: muted,
-                            fontWeight: FontWeight.w700,
+                            color: AppColors.gray,
+                            fontWeight: FontWeight.w600,
                           ),
-                        ),
-                        axisNameSize: 18,
-                      ),
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          getTitlesWidget: (v, _) {
-                            final i = v.toInt();
-                            if (i < 0 || i >= _barData.length) {
-                              return const SizedBox.shrink();
-                            }
-                            final d = _barData[i];
-                            final isPeak = i == _highlightIndex;
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                d.label,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: isPeak
-                                      ? FontWeight.w800
-                                      : FontWeight.w500,
-                                  color: isPeak
-                                      ? context.appTitleAccent
-                                      : muted,
-                                ),
-                              ),
-                            );
-                          },
                         ),
                       ),
                     ),
-                    barTouchData: BarTouchData(
-                      enabled: true,
-                      handleBuiltInTouches: true,
-                      touchTooltipData: BarTouchTooltipData(
-                        tooltipRoundedRadius: 8,
-                        getTooltipItem: (group, gi, rod, ri) {
-                          final d = _barData[group.x.toInt()];
-                          return BarTooltipItem(
-                            '${d.label}\n${d.value} scans',
-                            const TextStyle(
-                              color: AppColors.cream,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (v, _) {
+                          final i = v.toInt();
+                          if (i < 0 || i >= widget.data.length) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              widget.data[i].label,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: AppColors.gray,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           );
                         },
                       ),
-                      touchCallback: (event, response) {
-                        void apply() {
-                          if (!mounted) return;
-                          if (!event.isInterestedForInteractions ||
-                              response == null ||
-                              response.spot == null) {
-                            if (_touchedBarIndex != null) {
-                              setState(() => _touchedBarIndex = null);
-                            }
-                            return;
-                          }
-                          final index = response.spot!.touchedBarGroupIndex;
-                          if (_touchedBarIndex != index) {
-                            setState(() => _touchedBarIndex = index);
-                          }
-                        }
-
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          apply();
-                        });
-                      },
                     ),
-                    barGroups: [
-                      for (var i = 0; i < _barData.length; i++)
-                        BarChartGroupData(
-                          x: i,
-                          barRods: [
-                            BarChartRodData(
-                              toY: _barData[i].value.toDouble(),
-                              width: 18,
-                              color: _barColor(i, _touchedBarIndex == i),
-                              borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(6),
-                              ),
+                  ),
+                  barGroups: [
+                    for (var i = 0; i < widget.data.length; i++)
+                      BarChartGroupData(
+                        x: i,
+                        barRods: [
+                          BarChartRodData(
+                            toY: widget.data[i].value,
+                            width: 18,
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(6),
                             ),
-                          ],
-                          showingTooltipIndicators:
-                              _touchedBarIndex == i ? const [0] : const [],
-                        ),
-                    ],
+                            color: _touchedIndex == i
+                                ? AppColors.skyBlue
+                                : AppColors.primary,
+                          ),
+                        ],
+                      ),
+                  ],
+                  barTouchData: BarTouchData(
+                    enabled: true,
+                    touchCallback: (event, response) {
+                      if (!event.isInterestedForInteractions ||
+                          response == null ||
+                          response.spot == null) {
+                        setState(() => _touchedIndex = null);
+                        return;
+                      }
+                      setState(
+                        () => _touchedIndex =
+                            response.spot!.touchedBarGroupIndex,
+                      );
+                    },
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: _touchedBarIndex == null
-                    ? Text(
-                        key: const ValueKey('hint'),
-                        'Touchez une barre pour afficher le détail du jour.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: muted,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      )
-                    : Builder(
-                        key: ValueKey('day-$_touchedBarIndex'),
-                        builder: (context) {
-                          final d = _barData[_touchedBarIndex!];
-                          final pct = (d.value / _weekScanTotal * 100)
-                              .toStringAsFixed(0);
-                          return Text(
-                            '${d.label} : ${d.value} scans ($pct % de la semaine)',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: context.appTitleAccent,
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  _LegendDot(color: AppColors.skyBlue, label: 'Jour normal'),
-                  const SizedBox(width: 16),
-                  _LegendDot(
-                    color: AppColors.primary,
-                    label: 'Jour le plus actif (${peak.label})',
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
-
-  Color _barColor(int index, bool touched) {
-    if (touched) return AppColors.primaryLight;
-    if (index == _highlightIndex) return AppColors.primary;
-    return AppColors.skyBlue;
-  }
 }
 
-class _MonthlyLineChartCard extends StatelessWidget {
-  const _MonthlyLineChartCard();
+class _MonthlyLineChartCard extends StatefulWidget {
+  const _MonthlyLineChartCard({required this.data});
+
+  final List<_MonthDatum> data;
+
+  @override
+  State<_MonthlyLineChartCard> createState() =>
+      _MonthlyLineChartCardState();
+}
+
+class _MonthlyLineChartCardState extends State<_MonthlyLineChartCard> {
+  int? _touchedIndex;
 
   @override
   Widget build(BuildContext context) {
-    final data = _monthlyProductivity;
-    final last = data.last;
-    final prev = data[data.length - 2];
-    final delta = last.value - prev.value;
-    final muted = context.appOnSurfaceMuted;
-    final onSurface = context.appOnSurface;
+    final spots = [
+      for (var i = 0; i < widget.data.length; i++)
+        FlSpot(i.toDouble(), widget.data[i].value),
+    ];
+    final maxY = widget.data
+            .map((e) => e.value)
+            .reduce((a, b) => a > b ? a : b) *
+        1.1;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Material(
-        color: context.appCardColor,
-        elevation: 3,
-        shadowColor: AppColors.black.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(20),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Indice de productivité — 12 mois',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: onSurface,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Score synthétique du site (0 = faible, 100 = excellent) basé sur présences et délais.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: muted,
-                  height: 1.35,
-                ),
-              ),
-              const SizedBox(height: 10),
+    return Material(
+      color: context.appCardColor,
+      elevation: 2,
+      shadowColor: AppColors.black.withValues(alpha: 0.05),
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 16, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_touchedIndex != null)
               _ChartSummaryChip(
-                icon: Icons.show_chart_rounded,
-                text:
-                    '${last.label} : ${last.value}/100 (${delta >= 0 ? '+' : ''}$delta vs ${prev.label})',
+                label: widget.data[_touchedIndex!].label,
+                value: '${widget.data[_touchedIndex!].value.toInt()} t',
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 220,
-                child: LineChart(
-                  LineChartData(
-                    minY: 50,
-                    maxY: 100,
-                    gridData: FlGridData(
-                      show: true,
-                      drawVerticalLine: false,
-                      horizontalInterval: 10,
-                      getDrawingHorizontalLine: (_) => FlLine(
-                        color: context.appDividerOnPage,
-                        strokeWidth: 1,
-                      ),
+            SizedBox(
+              height: 200,
+              child: LineChart(
+                LineChartData(
+                  minY: 0,
+                  maxY: maxY,
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: 100,
+                    getDrawingHorizontalLine: (_) => FlLine(
+                      color: AppColors.grayLight.withValues(alpha: 0.8),
+                      strokeWidth: 1,
                     ),
-                    borderData: FlBorderData(show: false),
-                    titlesData: FlTitlesData(
-                      topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      leftTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          reservedSize: 28,
-                          interval: 10,
-                          getTitlesWidget: (v, _) => Text(
-                            v.toInt().toString(),
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: muted,
-                            ),
-                          ),
-                        ),
-                        axisNameWidget: Text(
-                          'Score',
-                          style: TextStyle(
+                  ),
+                  borderData: FlBorderData(show: false),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 36,
+                        getTitlesWidget: (v, _) => Text(
+                          v.toInt().toString(),
+                          style: const TextStyle(
                             fontSize: 10,
-                            color: muted,
-                            fontWeight: FontWeight.w700,
+                            color: AppColors.gray,
+                            fontWeight: FontWeight.w600,
                           ),
-                        ),
-                        axisNameSize: 18,
-                      ),
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          interval: 1,
-                          getTitlesWidget: (v, _) {
-                            final i = v.toInt();
-                            if (i < 0 || i >= data.length) {
-                              return const SizedBox.shrink();
-                            }
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                data[i].label,
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  color: muted,
-                                ),
-                              ),
-                            );
-                          },
                         ),
                       ),
                     ),
-                    lineTouchData: LineTouchData(
-                      touchTooltipData: LineTouchTooltipData(
-                        getTooltipItems: (spots) => spots.map((s) {
-                          final m = data[s.x.toInt()];
-                          return LineTooltipItem(
-                            '${m.label}\n${m.value} / 100',
-                            const TextStyle(
-                              color: AppColors.cream,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (v, _) {
+                          final i = v.toInt();
+                          if (i < 0 || i >= widget.data.length) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              widget.data[i].label,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: AppColors.gray,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           );
-                        }).toList(),
+                        },
                       ),
                     ),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: [
-                          for (var i = 0; i < data.length; i++)
-                            FlSpot(i.toDouble(), data[i].value.toDouble()),
-                        ],
-                        isCurved: true,
-                        color: AppColors.primary,
-                        barWidth: 3,
-                        dotData: FlDotData(
-                          show: true,
-                          getDotPainter: (spot, _, __, ___) {
-                            final isLast = spot.x == data.length - 1;
-                            return FlDotCirclePainter(
-                              radius: isLast ? 5 : 3,
-                              color: isLast
-                                  ? AppColors.primary
-                                  : AppColors.skyBlue,
-                              strokeWidth: isLast ? 2 : 0,
-                              strokeColor: AppColors.cream,
-                            );
-                          },
-                        ),
-                        belowBarData: BarAreaData(
-                          show: true,
-                          color: AppColors.primary.withValues(alpha: 0.12),
-                        ),
+                  ),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: spots,
+                      isCurved: true,
+                      color: AppColors.primary,
+                      barWidth: 3,
+                      dotData: FlDotData(
+                        show: true,
+                        getDotPainter: (spot, _, __, ___) {
+                          final i = spot.x.toInt();
+                          final selected = _touchedIndex == i;
+                          return FlDotCirclePainter(
+                            radius: selected ? 5 : 3,
+                            color: selected
+                                ? AppColors.skyBlue
+                                : AppColors.primary,
+                            strokeWidth: 2,
+                            strokeColor: AppColors.cream,
+                          );
+                        },
                       ),
-                    ],
+                      belowBarData: BarAreaData(
+                        show: true,
+                        color: AppColors.primary.withValues(alpha: 0.12),
+                      ),
+                    ),
+                  ],
+                  lineTouchData: LineTouchData(
+                    touchCallback: (event, response) {
+                      if (!event.isInterestedForInteractions ||
+                          response == null ||
+                          response.lineBarSpots == null ||
+                          response.lineBarSpots!.isEmpty) {
+                        setState(() => _touchedIndex = null);
+                        return;
+                      }
+                      setState(
+                        () => _touchedIndex =
+                            response.lineBarSpots!.first.spotIndex,
+                      );
+                    },
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -750,67 +707,33 @@ class _MonthlyLineChartCard extends StatelessWidget {
 }
 
 class _ChartSummaryChip extends StatelessWidget {
-  const _ChartSummaryChip({required this.icon, required this.text});
+  const _ChartSummaryChip({
+    required this.label,
+    required this.value,
+  });
 
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: context.appIconTileBg,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: context.appTitleAccent),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: context.appOnSurface,
-                height: 1.3,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LegendDot extends StatelessWidget {
-  const _LegendDot({required this.color, required this.label});
-
-  final Color color;
   final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppColors.cream,
+          borderRadius: BorderRadius.circular(8),
         ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            color: context.appOnSurfaceMuted,
-            fontWeight: FontWeight.w500,
+        child: Text(
+          '$label · $value',
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: AppColors.primary,
           ),
         ),
-      ],
+      ),
     );
   }
 }

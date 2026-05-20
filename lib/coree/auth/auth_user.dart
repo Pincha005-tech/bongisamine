@@ -2,8 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
-import 'app_roles.dart';
-
+/// Aligné sur `models/user` Expo (`AuthContext`).
 @immutable
 class AuthUser {
   const AuthUser({
@@ -11,53 +10,61 @@ class AuthUser {
     required this.name,
     required this.email,
     required this.role,
-    required this.apiRole,
     this.company,
+    this.accessToken,
   });
 
   final String id;
   final String name;
   final String email;
-  /// Persona UI : `agent` | `supervisor`
+  /// Rôles alignés `mine_back/app/core/roles.py`.
   final String role;
-  /// Rôle API : `AGENT_CONTROLE`, `SUPERVISOR_EXTRACTION`, etc.
-  final String apiRole;
   final String? company;
+  final String? accessToken;
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
         'email': email,
         'role': role,
-        'apiRole': apiRole,
         if (company != null && company!.isNotEmpty) 'company': company,
+        if (accessToken != null && accessToken!.isNotEmpty)
+          'access_token': accessToken,
       };
 
   static AuthUser fromJson(Map<String, dynamic> json) {
     return AuthUser(
-      id: json['id']?.toString() ?? '',
+      id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? 'User',
       email: json['email'] as String? ?? '',
-      role: normalizePersona(json['role'] as String?),
-      apiRole: json['apiRole'] as String? ?? json['api_role'] as String? ?? '',
+      role: normalizeRole(json['role'] as String?),
       company: json['company'] as String?,
+      accessToken: json['access_token'] as String?,
     );
   }
 
-  static String normalizePersona(String? r) {
-    final x = (r ?? 'supervisor').toLowerCase().trim().replaceAll('-', '_');
-    if (x == 'agent_controle' || x == 'agent') return AppRoles.agent;
-    if (x == 'supervisor' ||
-        x.startsWith('supervisor_') ||
-        x == 'superviseur') {
-      return AppRoles.supervisor;
-    }
-    return AppRoles.supervisor;
+  static String normalizeRole(String? r) {
+    final x = (r ?? 'worker').toLowerCase().trim();
+    const allowed = <String>{
+      'admin',
+      'supervisor',
+      'supervisor_extraction',
+      'supervisor_transport',
+      'supervisor_reception',
+      'worker',
+      'agent',
+      'agent_controle',
+      'auditor',
+      'state_authority',
+    };
+    if (allowed.contains(x)) return x;
+    return 'worker';
   }
 
   static AuthUser? tryDecode(String raw) {
     try {
-      return AuthUser.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return AuthUser.fromJson(map);
     } catch (_) {
       return null;
     }
@@ -68,16 +75,16 @@ class AuthUser {
     String? name,
     String? email,
     String? role,
-    String? apiRole,
     String? company,
+    String? accessToken,
   }) {
     return AuthUser(
       id: id ?? this.id,
       name: name ?? this.name,
       email: email ?? this.email,
       role: role ?? this.role,
-      apiRole: apiRole ?? this.apiRole,
       company: company ?? this.company,
+      accessToken: accessToken ?? this.accessToken,
     );
   }
 }

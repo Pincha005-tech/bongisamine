@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-import '../../coree/auth/auth_controller.dart';
 
 class DeleteAccountPage extends StatefulWidget {
   const DeleteAccountPage({super.key});
@@ -20,29 +18,17 @@ class _DeleteAccountPageState
     setState(() => isLoading = true);
 
     try {
-      await Future<void>.delayed(const Duration(milliseconds: 600));
-      if (!mounted) return;
-      await context.read<AuthController>().logout();
+      await Future<void>.delayed(const Duration(milliseconds: 800));
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Demande envoyée — session fermée localement"),
-        ),
-      );
-    } catch (e) {
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-
-        SnackBar(
           content: Text(
-            e.toString(),
+            'Suppression de compte non disponible via l\'API',
           ),
         ),
       );
-
     } finally {
 
       setState(() {

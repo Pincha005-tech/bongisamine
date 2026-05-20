@@ -1,8 +1,7 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 
+import '../../coree/auth/auth_controller.dart';
 import '../../coree/colors/app_colors.dart';
 
 
@@ -17,9 +16,6 @@ class PersonalInfoPage extends StatefulWidget {
 class _PersonalInfoPageState
     extends State<PersonalInfoPage> {
 
-  final String baseUrl =
-      "http://10.0.2.2:8000";
-
   bool isLoading = true;
 
   Map<String, dynamic> userData = {};
@@ -27,47 +23,22 @@ class _PersonalInfoPageState
   @override
   void initState() {
     super.initState();
-
     loadUserInfo();
   }
 
-  /// 👤 LOAD USER PROFILE
   Future<void> loadUserInfo() async {
-
-    try {
-
-      final response = await http.get(
-
-        Uri.parse(
-          "$baseUrl/user/profile",
-        ),
-      );
-
-      if (response.statusCode == 200) {
-
-        setState(() {
-
-          userData =
-              jsonDecode(response.body);
-
-          isLoading = false;
-        });
-
-      } else {
-
-        setState(() {
-          isLoading = false;
-        });
-      }
-
-    } catch (e) {
-
-      debugPrint(e.toString());
-
-      setState(() {
-        isLoading = false;
-      });
-    }
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (!mounted) return;
+    final auth = context.read<AuthController>();
+    final u = auth.user;
+    setState(() {
+      userData = {
+        'name': u?.name ?? 'Utilisateur',
+        'email': u?.email ?? '—',
+        'role': (u?.role ?? 'worker').toUpperCase(),
+      };
+      isLoading = false;
+    });
   }
 
   @override

@@ -2,40 +2,8 @@ import 'package:flutter/material.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
-import '../models/worker_model.dart';
-import '../services/worker_service.dart';
-
-/// Aligné sur `expo/app/(tabs)/workers.tsx`
-enum WorkerStatus { active, inactive, onLeave }
-
-/// Tri alphabétique sur le nom complet.
-enum WorkerNameSort { ascending, descending }
-
-class WorkerItem {
-  const WorkerItem({
-    required this.id,
-    required this.name,
-    required this.status,
-    required this.department,
-    required this.lastScan,
-  });
-
-  final String id;
-  final String name;
-  final WorkerStatus status;
-  final String department;
-  final String lastScan;
-}
-
-WorkerItem _workerFromModel(WorkerModel w) {
-  return WorkerItem(
-    id: w.id.toString(),
-    name: w.fullName,
-    status: WorkerStatus.active,
-    department: w.departmentRole ?? w.role,
-    lastScan: w.badgeId,
-  );
-}
+import '../models/worker_item.dart';
+import '../services/api_service.dart';
 
 String _anonymize(String name) {
   final parts = name.trim().split(RegExp(r'\s+'));
@@ -85,8 +53,6 @@ class _WorkersPageState extends State<WorkersPage> {
   List<WorkerItem> _filtered = [];
   List<String> _departments = [];
   bool _loading = true;
-  String? _loadError;
-
   bool get _isSupervisor => UserRoleController.role == 'supervisor';
 
   bool get _hasActiveFilters => !_filters.isEmpty;
@@ -95,33 +61,23 @@ class _WorkersPageState extends State<WorkersPage> {
   void initState() {
     super.initState();
     _queryController.addListener(_applyFilter);
-    _loadWorkers();
+    _applyFilter();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadFromApi());
   }
 
-  Future<void> _loadWorkers() async {
+  Future<void> _loadFromApi() async {
+    if (!mounted) return;
+    setState(() => _loading = true);
+    final workers = await ApiService.fetchWorkers();
+    if (!mounted) return;
     setState(() {
-      _loading = true;
-      _loadError = null;
+      _loading = false;
+      if (workers != null) {
+        _allWorkers = workers;
+        _departments = workers.map((w) => w.department).toSet().toList()..sort();
+      }
     });
-    try {
-      final page = await WorkerService.paginated(page: 1, limit: 100);
-      final items = page.data.map(_workerFromModel).toList();
-      if (!mounted) return;
-      setState(() {
-        _allWorkers = items;
-        _departments = items.map((w) => w.department).toSet().toList()..sort();
-        _loading = false;
-      });
-      _applyFilter();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _loadError = 'Impossible de charger les ouvriers';
-        _allWorkers = [];
-        _filtered = [];
-      });
-    }
+    _applyFilter();
   }
 
   @override
@@ -392,7 +348,10 @@ class _WorkersPageState extends State<WorkersPage> {
   int get _activeCount =>
       _allWorkers.where((w) => w.status == WorkerStatus.active).length;
 
-  Future<void> _onRefresh() async => _loadWorkers();
+  Future<void> _onRefresh() async {
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    if (mounted) _applyFilter();
+  }
 
   String _displayName(WorkerItem w) {
     if (_isSupervisor) return _anonymize(w.name);
@@ -499,11 +458,7 @@ class _WorkersPageState extends State<WorkersPage> {
             ),
           const SizedBox(height: 12),
           Expanded(
-            child: _loading
-                ? const Center(
-                    child: CircularProgressIndicator(color: AppColors.primary),
-                  )
-                : RefreshIndicator(
+            child: RefreshIndicator(
               color: AppColors.primary,
               onRefresh: _onRefresh,
               child: _filtered.isEmpty
@@ -520,8 +475,7 @@ class _WorkersPageState extends State<WorkersPage> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          _loadError ??
-                              'Aucun travailleur ne correspond aux critères.',
+                          'Aucun travailleur ne correspond aux critères.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 14,

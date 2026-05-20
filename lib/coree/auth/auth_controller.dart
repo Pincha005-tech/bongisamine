@@ -4,13 +4,12 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../api/api_config.dart';
-import '../api/api_exception.dart';
-import '../../services/auth_service.dart';
+import '../../services/api_service.dart';
+import '../api/api_role_mapper.dart';
 import '../theme/theme_notifier.dart';
-import 'app_roles.dart';
 import 'auth_user.dart';
 
+/// Session JWT — `POST /auth/login`, `GET /auth/me`, persistance locale.
 class AuthController extends ChangeNotifier {
   AuthController() {
     unawaited(_bootstrap());
@@ -22,37 +21,38 @@ class AuthController extends ChangeNotifier {
   bool isLoading = true;
   String? lastError;
 
-  String _persona = AppRoles.supervisor;
+  String _role = 'worker';
 
   bool get isLoggedIn => user != null;
-  String get role => _persona;
-  String get apiRole => user?.apiRole ?? '';
+  String get role => _role;
   String get name => user?.name ?? 'Utilisateur';
   String get email => user?.email ?? '';
   String? get company => user?.company;
   bool get isAuthenticated => isLoggedIn;
-  bool get isAgent => _persona == AppRoles.agent;
-  bool get isSupervisor => _persona == AppRoles.supervisor;
+  bool get hasApiToken =>
+      user?.accessToken != null && user!.accessToken!.isNotEmpty;
 
   Future<void> _bootstrap() async {
     try {
-      await ApiConfig.loadToken();
+      await ApiService.loadStoredToken();
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_prefsKey);
-      if (ApiConfig.token != null && raw != null && raw.isNotEmpty) {
-        final stored = AuthUser.tryDecode(raw);
-        if (stored != null) {
-          try {
-            final me = await AuthService.me();
-            user = stored.copyWith(
-              apiRole: me.apiRole,
-              name: me.username,
-              email: me.username,
+      if (raw != null && raw.isNotEmpty) {
+        final u = AuthUser.tryDecode(raw);
+        if (u != null) {
+          user = u;
+          _role = AuthUser.normalizeRole(u.role);
+          if (ApiService.accessToken != null) {
+            final profile = await ApiService.getUserProfile();
+            final apiRole = profile['role'] as String? ?? _role;
+            _role = AuthUser.normalizeRole(apiRole);
+            user = user!.copyWith(
+              name: profile['name'] as String? ?? user!.name,
+              email: profile['email'] as String? ?? user!.email,
+              role: _role,
+              accessToken: ApiService.accessToken,
             );
-            _persona = stored.role;
-          } catch (_) {
-            user = stored;
-            _persona = stored.role;
+            await _persist();
           }
         }
       }
@@ -63,7 +63,7 @@ class AuthController extends ChangeNotifier {
   }
 
   void _syncStaticRole() {
-    UserRoleController.role = _persona;
+    UserRoleController.role = _role;
   }
 
   Future<void> _persist() async {
@@ -73,46 +73,37 @@ class AuthController extends ChangeNotifier {
     await prefs.setString(_prefsKey, jsonEncode(u.toJson()));
   }
 
-  /// Connexion API : [username] + [password], persona = agent ou superviseur.
   Future<bool> login(String username, String password) async {
     lastError = null;
     final u = username.trim();
     if (u.isEmpty || password.length < 4) {
-      lastError = 'Identifiants invalides';
+      lastError = 'Identifiant ou mot de passe invalide';
       return false;
     }
 
-    try {
-      final result = await AuthService.login(u, password);
-
-      if (!AppRoles.matchesPersona(_persona, result.apiRole)) {
-        await AuthService.logout();
-        lastError = _persona == AppRoles.agent
-            ? 'Ce compte n\'est pas un agent de contrôle'
-            : 'Ce compte n\'est pas un superviseur';
-        return false;
-      }
-
+    final api = await ApiService.login(username: u, password: password);
+    if (api.ok && api.data != null) {
+      final data = api.data!;
+      final apiUser = data['user'] as Map<String, dynamic>? ?? {};
+      final token = data['access_token'] as String?;
+      final backendRole = apiUser['role'] as String? ?? 'AGENT';
+      _role = ApiRoleMapper.appRoleFromBackend(backendRole);
       user = AuthUser(
-        id: result.userId.toString(),
-        name: result.username,
-        email: result.username,
-        role: _persona,
-        apiRole: result.apiRole,
+        id: '${apiUser['id'] ?? ''}',
+        name: apiUser['username'] as String? ?? u,
+        email: apiUser['username'] as String? ?? u,
+        role: _role,
+        accessToken: token,
       );
       await _persist();
       _syncStaticRole();
       notifyListeners();
       return true;
-    } on ApiException catch (e) {
-      lastError = e.message;
-      notifyListeners();
-      return false;
-    } catch (_) {
-      lastError = 'Impossible de joindre le serveur';
-      notifyListeners();
-      return false;
     }
+
+    lastError = api.error ?? 'Connexion impossible';
+    notifyListeners();
+    return false;
   }
 
   Future<bool> signup(
@@ -121,32 +112,43 @@ class AuthController extends ChangeNotifier {
     String company,
     String password,
   ) async {
-    lastError =
-        'Inscription désactivée sur mobile — contactez l\'administrateur.';
-    notifyListeners();
-    return false;
+    lastError = null;
+    final n = name.trim();
+    final u = email.trim();
+    if (n.isEmpty || u.isEmpty || password.length < 4) return false;
+
+    final reg = await ApiService.register(
+      username: u,
+      password: password,
+      role: 'AGENT_CONTROLE',
+    );
+    if (!reg.ok) {
+      lastError = reg.error;
+      return false;
+    }
+
+    return login(u, password);
   }
 
   Future<void> logout() async {
-    await AuthService.logout();
     user = null;
+    _role = 'worker';
+    lastError = null;
+    await ApiService.setAccessToken(null);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefsKey);
     _syncStaticRole();
     notifyListeners();
   }
 
-  void setPersona(String persona) {
-    final p = AuthUser.normalizePersona(persona);
-    if (p == AppRoles.agent || p == AppRoles.supervisor) {
-      _persona = p;
-      if (user != null) {
-        user = user!.copyWith(role: p);
-        unawaited(_persist());
-      }
-      _syncStaticRole();
-      notifyListeners();
+  void setRole(String newRole) {
+    _role = AuthUser.normalizeRole(newRole);
+    if (user != null) {
+      user = user!.copyWith(role: _role);
+      unawaited(_persist());
     }
+    _syncStaticRole();
+    notifyListeners();
   }
 }
 
