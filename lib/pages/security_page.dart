@@ -8,6 +8,7 @@ import '../coree/auth/auth_controller.dart';
 import '../coree/colors/app_colors.dart';
 import '../coree/theme/app_page_style.dart';
 import '../coree/theme/theme_notifier.dart';
+import '../coree/api/api_config.dart';
 import '../services/api_service.dart';
 import 'changepass_page.dart';
 import 'privacy/privacy_page.dart';
@@ -22,6 +23,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _notifications = true;
+  final _apiUrlController = TextEditingController();
 
   String _name = 'Utilisateur';
   String _email = '';
@@ -32,14 +34,27 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    _apiUrlController.text = ApiConfig.baseUrl;
     appThemeModeNotifier.addListener(_onThemeChanged);
     unawaited(_loadProfile());
   }
 
   @override
   void dispose() {
+    _apiUrlController.dispose();
     appThemeModeNotifier.removeListener(_onThemeChanged);
     super.dispose();
+  }
+
+  Future<void> _saveApiUrl() async {
+    await ApiConfig.setBaseUrl(_apiUrlController.text);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('API : ${ApiConfig.baseUrl}'),
+        backgroundColor: AppColors.success,
+      ),
+    );
   }
 
   void _onThemeChanged() {
@@ -158,6 +173,65 @@ class _SettingsPageState extends State<SettingsPage> {
               title: 'Système',
               child: _buildCard(
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'URL de l\'API',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        TextField(
+                          controller: _apiUrlController,
+                          decoration: const InputDecoration(
+                            hintText: 'https://bongisa-mine-api.onrender.com',
+                            isDense: true,
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: TextInputType.url,
+                          autocorrect: false,
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            TextButton(
+                              onPressed: _saveApiUrl,
+                              child: const Text('Enregistrer'),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                await ApiConfig.resetBaseUrlToProduction();
+                                _apiUrlController.text = ApiConfig.baseUrl;
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('URL Render par défaut'),
+                                    ),
+                                  );
+                                }
+                              },
+                              child: const Text('Render'),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          'Doit être la même API que le centre de contrôle web.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.65),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   _SettingItem(
                     icon: Icons.dark_mode_outlined,
                     label: 'Mode sombre',

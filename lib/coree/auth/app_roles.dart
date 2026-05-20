@@ -9,10 +9,12 @@ class AppRoles {
   static const supervisor = 'supervisor';
 
   static const Set<String> supervisorApiRoles = {
+    'ADMIN',
     'SUPERVISOR',
     'SUPERVISOR_EXTRACTION',
     'SUPERVISOR_TRANSPORT',
     'SUPERVISOR_RECEPTION',
+    'STATE_AUTHORITY',
   };
 
   static const String agentApiRole = 'AGENT_CONTROLE';

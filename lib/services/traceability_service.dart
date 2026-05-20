@@ -1,4 +1,5 @@
 import '../coree/api/api_client.dart';
+import '../coree/traceability_rules.dart';
 import '../models/lot_movement_model.dart';
 
 class TraceabilityService {
@@ -17,6 +18,19 @@ class TraceabilityService {
     }
   }
 
+  static String defaultActionForRole(String apiRole) {
+    switch (apiRole) {
+      case 'SUPERVISOR_EXTRACTION':
+        return 'STOCKAGE_EXTRACTION';
+      case 'SUPERVISOR_TRANSPORT':
+        return 'CHARGEMENT_TRANSPORT';
+      case 'SUPERVISOR_RECEPTION':
+        return 'RECEPTION_DEPOT';
+      default:
+        return 'SCAN_LOT';
+    }
+  }
+
   static Future<LotMovementModel> scan({
     required String apiRole,
     required String imagePath,
@@ -28,6 +42,7 @@ class TraceabilityService {
     String? comment,
     String? newStatus,
     String? action,
+    String? currentStatus,
   }) async {
     final path = scanPathForRole(apiRole);
     final fields = <String, String>{
@@ -40,8 +55,11 @@ class TraceabilityService {
     };
 
     if (path == '/traceability/scan') {
-      if (newStatus != null) fields['new_status'] = newStatus;
-      if (action != null) fields['action'] = action;
+      final next = newStatus ??
+          TraceabilityRules.nextStatusInChain(currentStatus) ??
+          'STORED';
+      fields['new_status'] = next;
+      fields['action'] = action ?? defaultActionForRole(apiRole);
     }
 
     final data = await ApiClient.postMultipart(

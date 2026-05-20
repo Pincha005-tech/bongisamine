@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../coree/api/api_exception.dart';
 import '../coree/auth/auth_controller.dart';
 import '../coree/auth/app_roles.dart';
 import '../coree/colors/app_colors.dart';
+import '../coree/traceability_rules.dart';
 import '../coree/theme/app_page_style.dart';
 import '../services/qr_service.dart';
 import '../services/traceability_service.dart';
@@ -119,20 +121,37 @@ class _ScanPageState extends State<ScanPage> {
       return;
     }
 
+    final auth = context.read<AuthController>();
+
+    Map<String, dynamic> verify;
+    try {
+      verify = await QrService.verify(parsed.data, parsed.signature);
+    } catch (e) {
+      _showScanError(e);
+      return;
+    }
+
+    final valid = verify['valid'] as bool? ?? false;
+    if (!valid) {
+      _showSnack(
+        verify['message'] as String? ?? 'QR invalide',
+        isError: true,
+      );
+      return;
+    }
+
     if (!_isSupervisor) {
-      try {
-        final verify = await QrService.verify(parsed.data, parsed.signature);
-        final valid = verify['valid'] as bool? ?? false;
-        _showSnack(
-          verify['message'] as String? ?? (valid ? 'QR valide' : 'QR invalide'),
-          isError: !valid,
-        );
-        if (valid) {
-          setState(() => _lastResult = raw);
-        }
-      } catch (e) {
-        _showSnack(e.toString(), isError: true);
-      }
+      setState(() => _lastResult = verify['batch_code'] as String? ?? raw);
+      _showSnack(verify['message'] as String? ?? 'QR valide');
+      return;
+    }
+
+    final currentStatus = verify['current_status'] as String?;
+    if (!TraceabilityRules.canScan(auth.apiRole, currentStatus)) {
+      _showSnack(
+        TraceabilityRules.blockedMessage(auth.apiRole, currentStatus),
+        isError: true,
+      );
       return;
     }
 
@@ -145,13 +164,13 @@ class _ScanPageState extends State<ScanPage> {
     );
     if (photoPath == null || !mounted) return;
 
-    final auth = context.read<AuthController>();
     try {
       final movement = await TraceabilityService.scan(
         apiRole: auth.apiRole,
         imagePath: photoPath,
         qrData: parsed.data,
         qrSignature: parsed.signature,
+        currentStatus: currentStatus,
       );
       if (!mounted) return;
       setState(() {
@@ -169,8 +188,29 @@ class _ScanPageState extends State<ScanPage> {
       });
       _showSnack('Lot mis à jour : ${movement.newStatus}');
     } catch (e) {
-      _showSnack(e.toString(), isError: true);
+      _showScanError(e);
     }
+  }
+
+  void _showScanError(Object e) {
+    if (e is ApiException) {
+      final msg = e.message.toLowerCase();
+      if (e.statusCode == 403 && msg.contains('visage')) {
+        _showSnack(
+          'Visage non reconnu. Enregistrez d\'abord le visage de l\'ouvrier '
+          '(menu travailleurs / empreinte faciale).',
+          isError: true,
+        );
+        return;
+      }
+      if (msg.contains('transition')) {
+        _showSnack(e.message, isError: true);
+        return;
+      }
+      _showSnack(e.message, isError: true);
+      return;
+    }
+    _showSnack(e.toString(), isError: true);
   }
 
   String _nowLabel() {
@@ -190,7 +230,9 @@ class _ScanPageState extends State<ScanPage> {
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.paddingOf(context).top;
-    final isAgent = context.watch<AuthController>().isAgent;
+    final auth = context.watch<AuthController>();
+    final isAgent = auth.isAgent;
+    final showRoleHint = !isAgent && _isSupervisor;
 
     return DecoratedBox(
       decoration: context.appPageDecoration,
@@ -227,6 +269,41 @@ class _ScanPageState extends State<ScanPage> {
             ),
           ),
           if (!isAgent) SliverToBoxAdapter(child: _buildModeToggle()),
+          if (showRoleHint)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Material(
+                  color: context.appCardColor,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.info_outline_rounded,
+                          size: 20,
+                          color: context.appTitleAccent,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            TraceabilityRules.roleHint(auth.apiRole),
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.35,
+                              color: context.appOnSurfaceMuted,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           SliverToBoxAdapter(child: _buildScanArea()),
           SliverToBoxAdapter(child: _buildHistorySection()),
           const SliverToBoxAdapter(child: SizedBox(height: 32)),

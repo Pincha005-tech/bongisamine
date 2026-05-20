@@ -13,6 +13,7 @@ import 'coree/theme/theme_notifier.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppThemeController.initialize();
+  await ApiConfig.loadBaseUrl();
   await ApiConfig.loadToken();
 
   /// Équivalent `SplashScreen.preventAutoHideAsync` : le splash natif
